@@ -1,0 +1,17 @@
+# Secrets and local config
+.env
+.env.*
+!.env.example
+
+# Candidate data and run output (personal data: never commit)
+out/
+*.csv
+*.xlsx
+.mongo-data/
+
+# Python / tooling
+.venv/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.DS_Store

@@ -1,0 +1,363 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Candidate Report</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2230; --muted:#6b7385; --line:#e3e6ec; --accent:#2f5bea; --ok:#1a7f4b; --warn:#b7791f; --bad:#c0392b; --track:#e9ecf2; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171f; --card:#1c212c; --text:#e6e9f0; --muted:#8c94a8; --line:#2c3342; --accent:#7b98ff; --ok:#4cc38a; --warn:#e0a84a; --bad:#ef6f61; --track:#2a3040; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.5 system-ui, sans-serif; }
+  header, main { max-width:1280px; margin:0 auto; padding:16px; }
+  h1 { margin:0 0 4px; font-size:20px; } .sub { color:var(--muted); margin-bottom:12px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  input, select, button, textarea { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--text); }
+  button, .btn { cursor:pointer; } button:hover, .btn:hover { border-color:var(--accent); }
+  .btn { display:inline-block; padding:5px 9px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--accent); text-decoration:none; font-size:13px; margin:0 4px 4px 0; }
+  .btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  #q { flex:1 1 220px; } .count { margin-left:auto; color:var(--muted); }
+  details.tpl { margin:12px 0; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:10px 14px; }
+  summary { cursor:pointer; font-weight:600; }
+  textarea { width:100%; min-height:150px; margin-top:8px; font-family:inherit; }
+  .field { display:flex; gap:8px; align-items:center; margin-top:8px; } .field input { flex:1; }
+  .wrap { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; min-width:900px; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; white-space:nowrap; user-select:none; }
+  tr:last-child td { border-bottom:0; } .score { font-weight:700; font-variant-numeric:tabular-nums; }
+  tbody tr { cursor:pointer; } tbody tr:hover, tbody tr:focus-visible { background:color-mix(in srgb, var(--accent) 6%, transparent); outline:none; }
+  .name { font-weight:600; color:var(--accent); }
+  .muted { color:var(--muted); font-size:12px; } a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; } a.btn:hover { text-decoration:none; }
+  td select, td input { padding:4px 6px; font-size:13px; width:100%; } .contacted { background:color-mix(in srgb, var(--ok) 8%, transparent); }
+  .empty { padding:40px; text-align:center; color:var(--muted); }
+
+  /* Detail drawer */
+  #scrim { position:fixed; inset:0; background:rgba(10,12,18,.45); opacity:0; pointer-events:none; transition:opacity .15s; z-index:10; }
+  #scrim.open { opacity:1; pointer-events:auto; }
+  #drawer { position:fixed; top:0; right:0; bottom:0; width:min(560px, 100%); background:var(--card); border-left:1px solid var(--line);
+            transform:translateX(100%); transition:transform .18s ease; z-index:11; display:flex; flex-direction:column; }
+  #drawer.open { transform:none; }
+  .d-head { padding:16px 18px 12px; border-bottom:1px solid var(--line); display:flex; gap:12px; align-items:flex-start; }
+  .d-head h2 { margin:0; font-size:18px; } .d-head .grow { flex:1; min-width:0; }
+  .icon { padding:4px 9px; line-height:1; }
+  .d-body { padding:16px 18px 32px; overflow-y:auto; flex:1; }
+  .d-body h3 { margin:20px 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); }
+  .d-body h3:first-child { margin-top:0; }
+  .big { display:flex; align-items:center; gap:14px; }
+  .big .num { font-size:34px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1; }
+  .meter { flex:1; height:10px; border-radius:6px; background:var(--track); overflow:hidden; }
+  .meter > i { display:block; height:100%; background:var(--accent); border-radius:6px; }
+  .gate { display:flex; gap:8px; padding:5px 0; } .gate b { width:18px; flex:none; }
+  .gate.ok b { color:var(--ok); } .gate.no b { color:var(--bad); }
+  .rule { padding:8px 0; border-bottom:1px solid var(--line); } .rule:last-child { border-bottom:0; }
+  .rule .top { display:flex; justify-content:space-between; gap:8px; font-weight:600; }
+  .rule .meter { height:6px; margin:6px 0 4px; flex:none; }
+  .rule.full .meter > i { background:var(--ok); } .rule.partial .meter > i { background:var(--warn); } .rule.none .meter > i { background:var(--bad); }
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:4px 14px; } .kv dt { color:var(--muted); } .kv dd { margin:0; }
+  .chips { display:flex; flex-wrap:wrap; gap:6px; } .chip { padding:3px 9px; border:1px solid var(--line); border-radius:999px; font-size:12px; color:var(--text); }
+  pre.msg { white-space:pre-wrap; font:inherit; background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; margin:6px 0 8px; }
+  .d-body select, .d-body input.note { width:100%; margin-top:4px; }
+  .note-estimate { font-size:12px; color:var(--muted); margin-top:6px; }
+  #toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:var(--text); color:var(--bg); padding:10px 16px; border-radius:8px; z-index:20; max-width:92vw; box-shadow:0 6px 24px rgba(0,0,0,.3); }
+  @media (max-width:640px) { header, main { padding:12px; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">Candidate Report</h1>
+  <div class="sub" id="sub"></div>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Search name, login, location, company">
+    <label class="muted">Min score <input id="min" type="number" min="0" max="100" value="0" style="width:80px"></label>
+    <label class="muted"><input id="hasEmail" type="checkbox" style="width:auto"> Has email</label>
+    <select id="status" aria-label="Status"><option value="">All statuses</option></select>
+    <span class="count" id="count"></span>
+  </div>
+  <details class="tpl">
+    <summary>Email template (editable, saved in this browser)</summary>
+    <div class="field"><label for="sender">Your name</label><input id="sender" placeholder="Used as {sender}"></div>
+    <div class="field"><label for="subject">Subject</label><input id="subject"></div>
+    <textarea id="body" aria-label="Email body"></textarea>
+    <div class="muted">Placeholders: {first_name} {repo} {sender} {role_title}. Bare web addresses become clickable links. Nothing is sent automatically: the buttons only open or copy a draft for you to review.</div>
+    <button id="reset" type="button" style="margin-top:8px">Reset template</button>
+  </details>
+</header>
+<main>
+  <div class="muted" style="margin-bottom:8px">Click a candidate to see their full details and why they match.</div>
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th data-k="score">Score</th><th data-k="name">Candidate</th><th data-k="location">Location</th>
+        <th data-k="years">~Years</th><th>Links</th><th>Contact</th><th>Status</th><th>Notes</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No candidates match.</div>
+  </div>
+</main>
+
+<div id="toast" role="status" hidden></div>
+<div id="scrim"></div>
+<aside id="drawer" role="dialog" aria-modal="true" aria-labelledby="d-title" aria-hidden="true">
+  <div class="d-head">
+    <div class="grow"><h2 id="d-title"></h2><div class="muted" id="d-sub"></div></div>
+    <button class="icon" id="d-prev" type="button" aria-label="Previous candidate" title="Previous (K)">&#8593;</button>
+    <button class="icon" id="d-next" type="button" aria-label="Next candidate" title="Next (J)">&#8595;</button>
+    <button class="icon" id="d-close" type="button" aria-label="Close" title="Close (Esc)">&#10005;</button>
+  </div>
+  <div class="d-body" id="d-body"></div>
+</aside>
+
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById("data").textContent);
+const $ = id => document.getElementById(id);
+const STATUSES = ["new", "contacted", "replied", "interviewing", "rejected", "hired"];
+const KEY = "report:" + D.role;
+let sortKey = "score", sortDir = -1, openLogin = null, lastFocus = null;
+
+// Per-browser state: statuses, notes, template edits.
+let state = { status: {}, notes: {}, sender: "", subject: D.outreach.subject, body: D.outreach.body };
+try { state = { ...state, ...JSON.parse(localStorage.getItem(KEY) || "{}") }; } catch (e) {}
+const persist = () => { try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {} };
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const href = u => /^https?:\/\//i.test(u) ? u : "https://" + u;
+const link = (u, label, cls = "") => `<a ${cls ? `class="${cls}" ` : ""}href="${esc(href(u))}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+const statusOf = c => state.status[c.login] || "new";
+const pct = (p, m) => m ? Math.round(Math.min(p / m, 1) * 100) : 0;
+const byLogin = login => D.candidates.find(c => c.login === login);
+
+function draft(c) {
+  const fill = t => t
+    .replaceAll("{first_name}", (c.name || c.login).split(/\s+/)[0])
+    .replaceAll("{repo}", c.repos[0] || "your projects")
+    .replaceAll("{sender}", state.sender || "")
+    .replaceAll("{role_title}", D.outreach.role_title);
+  return { subject: fill(state.subject), body: fill(state.body).trim() };
+}
+
+function emailButtons(c, full = false) {
+  if (!c.emails.length) return "";
+  const L = esc(c.login);
+  return `<button class="btn primary" data-compose="gmail" data-login="${L}" type="button" title="Copies the formatted email, then opens Gmail. Paste it into the body.">Gmail</button>` +
+         `<button class="btn" data-compose="outlook" data-login="${L}" type="button" title="Copies the formatted email, then opens Outlook on the web. Paste it into the body.">Outlook</button>` +
+         (full ? `<button class="btn" data-compose="mailto" data-login="${L}" type="button" title="Opens your default mail app with plain text">Mail app</button>` +
+                 `<button class="btn" data-compose="copy" data-login="${L}" type="button">Copy body only</button>` : "");
+}
+
+function visible() {
+  const q = $("q").value.trim().toLowerCase(), min = +$("min").value || 0;
+  return D.candidates.filter(c =>
+    c.score >= min &&
+    (!$("hasEmail").checked || c.emails.length) &&
+    (!$("status").value || statusOf(c) === $("status").value) &&
+    (!q || [c.login, c.name, c.location, c.company].join(" ").toLowerCase().includes(q))
+  ).sort((a, b) => {
+    const x = a[sortKey] ?? "", y = b[sortKey] ?? "";
+    return (x > y ? 1 : x < y ? -1 : 0) * sortDir;
+  });
+}
+
+function render() {
+  const rows = visible();
+  $("count").textContent = `${rows.length} of ${D.candidates.length} candidates`;
+  $("empty").hidden = rows.length > 0;
+  $("rows").innerHTML = rows.map(c => `
+    <tr tabindex="0" data-login="${esc(c.login)}" class="${statusOf(c) === "contacted" ? "contacted" : ""}">
+      <td class="score">${c.score.toFixed(1)}</td>
+      <td><span class="name">${esc(c.name)}</span><div class="muted">@${esc(c.login)}</div>
+          ${c.company ? `<div class="muted">${esc(c.company)}</div>` : ""}
+          ${c.repos.length ? `<div class="muted">${esc(c.repos.slice(0, 3).join(", "))}</div>` : ""}</td>
+      <td>${esc(c.location)}</td>
+      <td>${c.years ?? "-"}</td>
+      <td>${c.linkedin ? link(c.linkedin, "LinkedIn") + "<br>" : ""}${c.portfolio ? link(c.portfolio, "Portfolio") + "<br>" : ""}${c.resumes[0] ? link(c.resumes[0], "Resume") : ""}</td>
+      <td>${emailButtons(c)}${c.emails.length ? `<div class="muted">${esc(c.emails[0])}</div>` : '<span class="muted">No email: use LinkedIn</span>'}
+          ${c.phones.map(p => `<div class="muted">${esc(p)}</div>`).join("")}</td>
+      <td><select class="st">${STATUSES.map(s => `<option ${s === statusOf(c) ? "selected" : ""}>${s}</option>`).join("")}</select></td>
+      <td><input class="note" value="${esc(state.notes[c.login])}" placeholder="Add note"></td>
+    </tr>`).join("");
+  if (openLogin) renderDrawer();
+}
+
+/* ---------- detail drawer ---------- */
+function renderDrawer() {
+  const c = byLogin(openLogin); if (!c) return closeDrawer();
+  const w = c.why, d = draft(c);
+  $("d-title").textContent = c.name;
+  $("d-sub").innerHTML = [`@${esc(c.login)}`, c.company && esc(c.company), c.location && esc(c.location)].filter(Boolean).join(" &middot; ");
+
+  const gates = w.gates.map(g => `<div class="gate ${g.ok ? "ok" : "no"}"><b>${g.ok ? "&#10003;" : "&#10007;"}</b><div><div>${esc(g.name)}</div><div class="muted">${esc(g.detail)}</div></div></div>`).join("");
+  const rules = w.rules.map(r => `
+    <div class="rule ${r.level}">
+      <div class="top"><span>${esc(r.name)}</span><span>${r.points} / ${r.max}</span></div>
+      <div class="meter"><i style="width:${pct(r.points, r.max)}%"></i></div>
+      <div class="muted">${esc(r.detail)}</div>
+    </div>`).join("");
+
+  const links = [
+    link(c.github, "GitHub", "btn"),
+    c.linkedin && link(c.linkedin, "LinkedIn", "btn"),
+    c.portfolio && link(c.portfolio, "Portfolio", "btn"),
+    ...c.resumes.map((u, i) => link(u, c.resumes.length > 1 ? `Resume ${i + 1}` : "Resume", "btn")),
+  ].filter(Boolean).join("");
+  const repos = c.repos.map(r => link(`https://github.com/${c.login}/${r}`, esc(r), "chip")).join("");
+
+  $("d-body").innerHTML = `
+    <div class="big"><div class="num">${c.score.toFixed(1)}</div>
+      <div style="flex:1"><div class="meter"><i style="width:${Math.min(c.score, 100)}%"></i></div>
+      <div class="muted" style="margin-top:4px">Match score out of 100 for ${esc(D.role)}</div></div></div>
+
+    <h3>Must-haves</h3>${gates}
+
+    <h3>Why this score</h3>${rules}
+    <div class="note-estimate">Scores come from public GitHub activity only. Experience is estimated from the first public repo, so confirm it with the candidate.</div>
+
+    <h3>Profile</h3>
+    ${c.bio ? `<p style="margin:0 0 8px">${esc(c.bio)}</p>` : ""}
+    <dl class="kv">
+      <dt>Estimated experience</dt><dd>${c.years != null ? "~" + c.years + " years" : "unknown"}</dd>
+      <dt>Last public activity</dt><dd>${esc(c.last_active || "unknown")}</dd>
+      <dt>Public repos</dt><dd>${c.public_repos}</dd>
+      <dt>Followers</dt><dd>${c.followers}</dd>
+      <dt>Open to work</dt><dd>${c.hireable ? "Yes (set on GitHub)" : "Not stated"}</dd>
+    </dl>
+
+    <h3>Links</h3><div>${links}</div>
+
+    <h3>Contact</h3>
+    ${c.emails.map(e => `<div><a href="mailto:${esc(e)}">${esc(e)}</a></div>`).join("") || '<div class="muted">No public email. Use LinkedIn or the portfolio.</div>'}
+    ${c.phones.map(p => `<div>${esc(p)}</div>`).join("")}
+
+    ${repos ? `<h3>Repos showing ${esc(D.role_summary.keywords.slice(0, 2).join(" / "))}</h3><div class="chips">${repos}</div>` : ""}
+
+    ${c.emails.length ? `<h3>Outreach draft</h3>
+      <div class="muted">Subject: ${esc(d.subject)}</div><pre class="msg">${esc(d.body)}</pre>
+      <div>${emailButtons(c, true)}</div>
+      <div class="note-estimate">Gmail and Outlook copy the formatted email (links stay clickable). Press Cmd/Ctrl+V in the email body after the window opens.</div>` : ""}
+
+    <h3>Tracking</h3>
+    <select class="st" data-login="${esc(c.login)}" aria-label="Status">${STATUSES.map(s => `<option ${s === statusOf(c) ? "selected" : ""}>${s}</option>`).join("")}</select>
+    <input class="note" data-login="${esc(c.login)}" value="${esc(state.notes[c.login])}" placeholder="Add note">`;
+}
+
+function openDrawer(login) {
+  if (!openLogin) lastFocus = document.activeElement;
+  openLogin = login;
+  renderDrawer();
+  $("drawer").classList.add("open"); $("scrim").classList.add("open"); $("drawer").setAttribute("aria-hidden", "false");
+  $("d-body").scrollTop = 0; $("d-close").focus();
+  history.replaceState(null, "", "#c=" + encodeURIComponent(login));
+}
+function closeDrawer() {
+  openLogin = null;
+  $("drawer").classList.remove("open"); $("scrim").classList.remove("open"); $("drawer").setAttribute("aria-hidden", "true");
+  history.replaceState(null, "", location.pathname + location.search);
+  if (lastFocus && lastFocus.focus) lastFocus.focus();
+}
+function step(delta) {
+  const list = visible(), i = list.findIndex(c => c.login === openLogin);
+  if (i >= 0 && list[i + delta]) openDrawer(list[i + delta].login);
+}
+
+/* ---------- events ---------- */
+function onChange(e) {
+  const el = e.target, login = el.dataset.login || (el.closest("tr") || {}).dataset?.login;
+  if (!login) return;
+  if (el.classList.contains("st")) state.status[login] = el.value;
+  if (el.classList.contains("note")) state.notes[login] = el.value;
+  persist(); render();
+}
+$("rows").addEventListener("change", onChange);
+$("d-body").addEventListener("change", onChange);
+
+// Mail links can only carry plain text, so copy the body as rich HTML instead: pasting it into
+// Gmail/Outlook keeps real, clickable links.
+function toHtml(text) {
+  const linked = esc(text).replace(/(https?:\/\/[^\s<]+?)([.,;:!?)]*)(?=\s|$)/g, (m, u, tail) => `<a href="${u}">${u}</a>${tail}`);
+  return linked.split(/\n{2,}/).map(p => `<p style="margin:0 0 12px">${p.replace(/\n/g, "<br>")}</p>`).join("");
+}
+function copyRich(text) {
+  const box = document.createElement("div");
+  box.innerHTML = toHtml(text);
+  box.style.cssText = "position:fixed;left:-9999px;top:0;white-space:normal";
+  document.body.appendChild(box);
+  const range = document.createRange(), sel = getSelection();
+  range.selectNodeContents(box); sel.removeAllRanges(); sel.addRange(range);
+  let ok = false;
+  try { ok = document.execCommand("copy"); } catch (e) {}
+  sel.removeAllRanges(); box.remove();
+  return ok;
+}
+let toastTimer;
+function toast(msg) {
+  const t = $("toast"); t.textContent = msg; t.hidden = false;
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => { t.hidden = true; }, 6000);
+}
+function composeUrl(kind, c, d) {
+  const to = encodeURIComponent(c.emails[0]), su = encodeURIComponent(d.subject);
+  if (kind === "gmail") return `https://mail.google.com/mail/?view=cm&fs=1&to=${to}&su=${su}`;
+  if (kind === "outlook") return `https://outlook.office.com/mail/deeplink/compose?to=${to}&subject=${su}`;
+  return `mailto:${c.emails[0]}?subject=${su}&body=${encodeURIComponent((d.body + "\n\n").replace(/\n/g, "\r\n"))}`;  // trailing breaks let a final URL become a link
+}
+function onAction(e) {
+  const b = e.target.closest("button[data-compose]");
+  if (!b) return false;
+  const c = byLogin(b.dataset.login), d = draft(c), kind = b.dataset.compose;
+  if (kind !== "mailto") {
+    const ok = copyRich(d.body);
+    toast(ok ? "Email body copied with clickable links. Press Cmd/Ctrl+V in the email body." : "Could not copy automatically: select the draft text and copy it by hand.");
+  }
+  if (kind === "mailto") location.href = composeUrl("mailto", c, d);
+  else if (kind !== "copy") window.open(composeUrl(kind, c, d), "_blank", "noopener");
+  if (statusOf(c) === "new") { state.status[c.login] = "contacted"; persist(); setTimeout(render, 300); }
+  return true;
+}
+$("d-body").addEventListener("click", onAction);
+$("rows").addEventListener("click", e => {
+  if (onAction(e)) return;
+  if (e.target.closest("a, button, select, input")) return;  // links and controls keep their own behaviour
+  const tr = e.target.closest("tr"); if (tr) openDrawer(tr.dataset.login);
+});
+$("rows").addEventListener("keydown", e => {
+  if (e.key === "Enter" && e.target.tagName === "TR") openDrawer(e.target.dataset.login);
+});
+$("scrim").addEventListener("click", closeDrawer);
+$("d-close").addEventListener("click", closeDrawer);
+$("d-prev").addEventListener("click", () => step(-1));
+$("d-next").addEventListener("click", () => step(1));
+document.addEventListener("keydown", e => {
+  if (!openLogin) return;
+  if (e.key === "Escape") return closeDrawer();
+  if (e.target.matches("input, textarea, select")) return;
+  if (e.key === "j" || e.key === "ArrowDown") { e.preventDefault(); step(1); }
+  if (e.key === "k" || e.key === "ArrowUp") { e.preventDefault(); step(-1); }
+});
+
+document.querySelector("thead").addEventListener("click", e => {
+  const k = e.target.dataset.k; if (!k) return;
+  sortDir = sortKey === k ? -sortDir : -1; sortKey = k; render();
+});
+["min", "hasEmail", "status"].forEach(id => $(id).addEventListener("change", render));
+$("q").addEventListener("input", render);
+[["sender", "sender"], ["subject", "subject"], ["body", "body"]].forEach(([id, k]) =>
+  $(id).addEventListener("input", () => { state[k] = $(id).value; persist(); render(); }));
+$("reset").addEventListener("click", () => {
+  state.subject = D.outreach.subject; state.body = D.outreach.body;
+  $("subject").value = state.subject; $("body").value = state.body; persist(); render();
+});
+
+$("title").textContent = "Candidate Report: " + D.role;
+const rs = D.role_summary;
+$("sub").textContent = `Generated ${D.generated}. Looking for ${rs.languages.join("/")} developers (${rs.keywords.slice(0, 3).join(", ")}), ${rs.experience[0]}-${rs.experience[1]} years, in India. Public profile data only; share internally and honour removal requests.`;
+$("status").innerHTML += STATUSES.map(s => `<option>${s}</option>`).join("");
+$("sender").value = state.sender; $("subject").value = state.subject; $("body").value = state.body;
+render();
+const deep = location.hash.match(/^#c=(.+)$/);
+if (deep && byLogin(decodeURIComponent(deep[1]))) openDrawer(decodeURIComponent(deep[1]));
+</script>
+</body>
+</html>

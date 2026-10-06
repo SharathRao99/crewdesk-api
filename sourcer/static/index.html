@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Talent Sourcer</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1c2230; --muted:#6b7385; --line:#e3e6ec; --accent:#2f5bea; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#14171f; --card:#1c212c; --text:#e6e9f0; --muted:#8c94a8; --line:#2c3342; --accent:#7b98ff; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.45 system-ui, sans-serif; }
+  header { padding:20px 16px 8px; max-width:1200px; margin:0 auto; }
+  h1 { margin:0 0 12px; font-size:20px; }
+  .bar { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+  input, select, button { font:inherit; padding:7px 10px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--text); }
+  button { cursor:pointer; } button:hover { border-color:var(--accent); }
+  #q { flex:1 1 200px; }
+  .count { color:var(--muted); margin-left:auto; }
+  main { max-width:1200px; margin:0 auto; padding:8px 16px 40px; }
+  .wrap { background:var(--card); border:1px solid var(--line); border-radius:8px; overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; min-width:860px; }
+  th, td { text-align:left; padding:9px 12px; border-bottom:1px solid var(--line); vertical-align:top; }
+  th { color:var(--muted); font-weight:600; font-size:12px; text-transform:uppercase; letter-spacing:.04em; cursor:pointer; user-select:none; white-space:nowrap; }
+  tr:last-child td { border-bottom:0; }
+  .score { font-weight:700; font-variant-numeric:tabular-nums; }
+  .muted { color:var(--muted); font-size:12px; }
+  a { color:var(--accent); text-decoration:none; } a:hover { text-decoration:underline; }
+  td select, td input { padding:4px 6px; font-size:13px; width:100%; }
+  .empty { padding:40px; text-align:center; color:var(--muted); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Talent Sourcer</h1>
+  <div class="bar">
+    <select id="role" aria-label="Role"></select>
+    <select id="status" aria-label="Status"><option value="">All statuses</option></select>
+    <input id="min" type="number" min="0" max="100" value="0" style="width:90px" aria-label="Minimum score" title="Minimum score">
+    <label class="muted"><input id="reach" type="checkbox" style="width:auto"> Has LinkedIn / portfolio / resume</label>
+    <input id="q" type="search" placeholder="Search name, login, location, bio">
+    <a id="csv" href="#"><button type="button">Export CSV</button></a>
+    <span class="count" id="count"></span>
+  </div>
+</header>
+<main>
+  <div class="wrap">
+    <table>
+      <thead><tr>
+        <th data-k="score">Score</th><th data-k="login">Candidate</th><th data-k="location">Location</th>
+        <th data-k="est_years">~Years</th><th data-k="last_active">Last active</th>
+        <th>Links</th><th>Contact</th><th>Status</th><th>Notes</th>
+      </tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty" hidden>No candidates match.</div>
+  </div>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+let data = [], sortKey = "score", sortDir = -1, statuses = [];
+
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error((await r.text()) || r.statusText);
+  return r.json();
+}
+
+function params() {
+  const p = new URLSearchParams({ role: $("role").value, min_score: $("min").value || 0 });
+  if ($("status").value) p.set("status", $("status").value);
+  if ($("reach").checked) p.set("reachable", "true");
+  if ($("q").value.trim()) p.set("q", $("q").value.trim());
+  return p;
+}
+
+async function load() {
+  if (!$("role").value) return render();
+  data = await api("/api/candidates?" + params());
+  $("csv").href = "/api/export.csv?" + params();
+  render();
+}
+
+const safeUrl = u => /^https?:\/\//i.test(u) ? u : "https://" + u;
+const link = (u, label) => `<a href="${esc(safeUrl(u))}" target="_blank" rel="noopener noreferrer">${label}</a>`;
+
+function links(r) {
+  const out = [];
+  const site = r.portfolio_url || r.blog;
+  if (site) out.push(link(site, "Portfolio"));
+  if (r.linkedin_url) out.push(link(r.linkedin_url, "LinkedIn"));
+  (r.resume_links || []).slice(0, 1).forEach(u => out.push(link(u, "Resume")));
+  return out.length ? out.join('<br>') : '<span class="muted">-</span>';
+}
+
+function emails(r) {
+  const mails = [...new Set([r.email, ...(r.portfolio_emails || [])].filter(Boolean))]
+    .map(e => `<a href="mailto:${esc(e)}">${esc(e)}</a>`);
+  const phones = (r.portfolio_phones || []).map(esc);
+  const all = [...mails, ...phones];
+  return all.length ? all.join("<br>") : '<span class="muted">-</span>';
+}
+
+function render() {
+  const rows = [...data].sort((a, b) => {
+    const x = a[sortKey] ?? "", y = b[sortKey] ?? "";
+    return (x > y ? 1 : x < y ? -1 : 0) * sortDir;
+  });
+  $("count").textContent = rows.length + " candidates";
+  $("empty").hidden = rows.length > 0;
+  $("rows").innerHTML = rows.map(r => `
+    <tr data-login="${esc(r.login)}">
+      <td class="score">${r.score.toFixed(1)}</td>
+      <td><a href="${esc(r.url)}" target="_blank" rel="noopener">${esc(r.name || r.login)}</a>
+          <div class="muted">@${esc(r.login)}${r.hireable ? " · hireable" : ""}</div>
+          ${r.company ? `<div class="muted">${esc(r.company)}</div>` : ""}
+          <div class="muted">${esc((r.matching_repos || []).join(", "))}</div></td>
+      <td>${esc(r.location)}</td>
+      <td>${r.est_years ?? "-"}</td>
+      <td>${esc(r.last_active || "-")}</td>
+      <td>${links(r)}</td>
+      <td>${emails(r)}</td>
+      <td><select class="st">${statuses.map(s => `<option ${s === r.status ? "selected" : ""}>${s}</option>`).join("")}</select></td>
+      <td><input class="note" value="${esc(r.notes)}" placeholder="Add note"></td>
+    </tr>`).join("");
+}
+
+async function save(tr) {
+  const body = { status: tr.querySelector(".st").value, note: tr.querySelector(".note").value };
+  await api(`/api/candidates/${encodeURIComponent(tr.dataset.login)}?role=${encodeURIComponent($("role").value)}`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+  });
+  const row = data.find(r => r.login === tr.dataset.login);
+  Object.assign(row, { status: body.status, notes: body.note });
+}
+
+$("rows").addEventListener("change", e => { const tr = e.target.closest("tr"); if (tr) save(tr).catch(err => alert(err.message)); });
+document.querySelector("thead").addEventListener("click", e => {
+  const k = e.target.dataset.k; if (!k) return;
+  sortDir = sortKey === k ? -sortDir : -1; sortKey = k; render();
+});
+["role", "status", "min", "reach"].forEach(id => $(id).addEventListener("change", load));
+let t; $("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(load, 250); });
+
+(async () => {
+  const meta = await api("/api/meta");
+  statuses = meta.statuses;
+  $("role").innerHTML = meta.roles.map(r => `<option>${esc(r)}</option>`).join("");
+  $("status").innerHTML += statuses.map(s => `<option>${s}</option>`).join("");
+  load();
+})();
+</script>
+</body>
+</html>
