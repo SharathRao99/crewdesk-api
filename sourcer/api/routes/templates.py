@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 
-from sourcer import roles_store, templates_store
+from sourcer import roles_store, screening, templates_store
 from sourcer.api.deps import Context, get_context
 from sourcer.api.models import PlaceholderOut, PreviewIn, PreviewOut, TemplateIn, TemplateOut
 from sourcer.outreach import PLACEHOLDERS, candidate_values, render, unknown_placeholders
@@ -69,5 +69,5 @@ def preview(body: PreviewIn, ctx: Context = Depends(get_context)) -> PreviewOut:
             role_title = role.outreach.get("role_title") or role.name
         except KeyError:
             pass
-    subject, text = render(body.subject, body.body, candidate_values(row, ctx.tenant_name, role_title, body.sender.strip()))
+    subject, text = render(body.subject, body.body, candidate_values(row, ctx.tenant_name, role_title, body.sender.strip(), f"{screening.web_base_url()}/s/this-is-a-preview-link"))
     return PreviewOut(subject=subject, body=text, unknown=unknown_placeholders(body.subject, body.body), sample=sample)

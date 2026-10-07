@@ -24,6 +24,25 @@ class PasswordBody(BaseModel):
     new: str
 
 
+class ScreeningSummary(BaseModel):
+    current_ctc: float
+    expected_ctc: float
+    notice_days: int
+    answered_at: str
+
+
+class BudgetIn(BaseModel):
+    min: Optional[float] = None
+    max: float
+    stretch_max: Optional[float] = None
+
+
+class BudgetOut(BaseModel):
+    min: Optional[float] = None
+    max: float
+    stretch_max: Optional[float] = None
+
+
 class CandidateListItem(BaseModel):
     role: str
     login: str
@@ -42,6 +61,8 @@ class CandidateListItem(BaseModel):
     github_url: str
     repos: List[str] = []
     hireable: bool = False
+    screening: Optional[ScreeningSummary] = None
+    budget_verdict: Optional[str] = None  # within | stretch | over, from the role's current budget
 
 
 class CandidateList(BaseModel):
@@ -115,6 +136,7 @@ class RoleOut(BaseModel):
     max_years: float
     default_template_id: Optional[str] = None
     candidates: int = 0
+    budget: Optional[BudgetOut] = None
 
 
 class DefaultTemplateBody(BaseModel):
@@ -171,3 +193,44 @@ class DraftOut(BaseModel):
     mailto_link: Optional[str] = None
     gmail_link: Optional[str] = None
     outlook_link: Optional[str] = None
+
+
+class ScreeningAnswers(BaseModel):
+    current_ctc: float
+    expected_ctc: float
+    notice_days: int
+    comment: Optional[str] = None
+    submitted_at: str
+
+
+class ScreeningOut(BaseModel):
+    state: str  # none | pending | answered | expired
+    link_url: Optional[str] = None
+    expires_at: Optional[str] = None
+    answers: Optional[ScreeningAnswers] = None
+    verdict: Optional[str] = None
+    budget: Optional[BudgetOut] = None
+
+
+class PublicStateOut(BaseModel):
+    state: str  # open | answered | expired | invalid
+    first_name: Optional[str] = None
+    role_title: Optional[str] = None
+    company_name: Optional[str] = None
+    consent_version: Optional[str] = None
+
+
+class PublicAnswersIn(BaseModel):
+    current_ctc: float = Field(ge=0, le=500)
+    expected_ctc: float = Field(ge=0, le=500)
+    notice_days: int = Field(ge=0, le=365)
+    comment: Optional[str] = Field(default=None, max_length=500)
+    consent: bool
+    website: str = ""  # hidden field: people leave it empty, form-filling bots do not
+
+
+class DeletedOut(BaseModel):
+    candidates: int
+    events: int
+    links: int
+    responses: int

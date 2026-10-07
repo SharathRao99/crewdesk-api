@@ -162,7 +162,7 @@ def test_template_crud_and_versions(api, seeded):
 
 
 @pytest.mark.parametrize("bad", [
-    {"subject": "Hi {firstname}"}, {"body": "x {form_link}"}, {"name": " "}, {"subject": ""}, {"body": "x" * 10001},
+    {"subject": "Hi {firstname}"}, {"body": "x {link}"}, {"name": " "}, {"subject": ""}, {"body": "x" * 10001},
 ])
 def test_template_rejects_bad_text(api, seeded, bad):
     assert api.post("/templates", json=tpl(**bad), headers=H(seeded)).status_code == 422

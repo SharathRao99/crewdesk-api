@@ -53,3 +53,9 @@ def audit(ctx: Context, action: str, detail: Optional[Dict[str, Any]] = None) ->
     ctx.db["audit_log"].insert_one(
         {"action": action, "by": str(ctx.user["_id"]), "email": ctx.user["email"], "detail": detail or {}, "at": datetime.now(timezone.utc)}
     )
+
+
+def require_admin(ctx: Context = Depends(get_context)) -> Context:
+    if ctx.user.get("role") != "admin":
+        raise HTTPException(403, "Only an administrator can do this")
+    return ctx

@@ -76,6 +76,16 @@ def _candidates_revalidate(a):
         print(f"Kept {len(kept_contacted)} that already have a status (review by hand): {', '.join(kept_contacted)}")
 
 
+def _retention_run(a):
+    """Delete form answers and links older than --days (default 180) for one company, or all of them."""
+    from sourcer import screening
+
+    slugs = [t["slug"] for t in registry.list_tenants()] if a.all else [a.tenant]
+    for slug in slugs:
+        result = screening.purge_old(tenant_db(slug), a.days)
+        print(f"{slug}: removed {result['responses']} answers and {result['links']} links older than {a.days} days")
+
+
 def _user_create(a):
     user, password = registry.create_user(a.email, a.tenant, a.role, a.password)
     print(f"Created {user['role']} {user['email']} in {a.tenant!r}.")
@@ -118,6 +128,10 @@ def build_parser() -> argparse.ArgumentParser:
     cand = sub.add_parser("candidates").add_subparsers(dest="cmd", required=True)
     p = cand.add_parser("revalidate", help="drop candidates outside the role's locations")
     p.add_argument("--tenant", required=True); p.add_argument("--role", required=True); p.set_defaults(func=_candidates_revalidate)
+
+    ret = sub.add_parser("retention").add_subparsers(dest="cmd", required=True)
+    p = ret.add_parser("run", help="delete old screening answers and links"); p.add_argument("--tenant"); p.add_argument("--all", action="store_true")
+    p.add_argument("--days", type=int, default=180); p.set_defaults(func=_retention_run)
 
     user = sub.add_parser("user").add_subparsers(dest="cmd", required=True)
     p = user.add_parser("create"); p.add_argument("--tenant", required=True); p.add_argument("--email", required=True)

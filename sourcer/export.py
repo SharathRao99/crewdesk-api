@@ -8,7 +8,7 @@ from sourcer.outreach import best_email, mail_links, render_draft
 
 COLUMNS = [
     "score", "name", "email_to", "gmail_link", "outlook_link", "mailto_link", "email_subject", "email_message",
-    "linkedin_url", "portfolio_url", "resume_links", "portfolio_phones", "location", "company", "est_years",
+    "expected_ctc", "current_ctc", "notice_days", "budget_verdict", "linkedin_url", "portfolio_url", "resume_links", "portfolio_phones", "location", "company", "est_years",
     "last_active", "matching_repos", "hireable", "bio", "url", "login", "status", "notes",
 ]
 LINK_LABELS = {"gmail_link": "Open in Gmail", "outlook_link": "Open in Outlook", "mailto_link": "Open in mail app"}
@@ -38,15 +38,23 @@ def prepare(
     sender: str,
     keep: Callable[[Dict[str, Any]], bool],
     company_name: str = "",
+    form_links: Optional[Dict[str, str]] = None,
+    budget: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
-    """Filter rows with `keep` and add the email address, draft and mail links."""
+    """Filter rows with `keep` and add the email address, draft, mail links and any form answers."""
+    from sourcer.screening import verdict
+
     out = []
     for row in rows:
         if not keep(row):
             continue
         row = {**row, "email_to": best_email(row)}
+        answers = row.get("screening")
+        if answers:
+            row.update(expected_ctc=answers["expected_ctc"], current_ctc=answers["current_ctc"], notice_days=answers["notice_days"],
+                       budget_verdict=verdict(answers["expected_ctc"], budget))
         if outreach and row["email_to"]:
-            row["email_subject"], row["email_message"] = render_draft(row, outreach, sender, company_name)
+            row["email_subject"], row["email_message"] = render_draft(row, outreach, sender, company_name, (form_links or {}).get(row["_id"], ""))
             row.update(mail_links(row["email_to"], row["email_subject"], row["email_message"]))
         out.append(flatten(row))
     return out

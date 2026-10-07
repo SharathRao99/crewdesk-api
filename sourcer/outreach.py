@@ -19,6 +19,7 @@ PLACEHOLDERS: Dict[str, str] = {
     "company_name": "Your company name",
     "role_title": "Title of the role you are hiring for",
     "sender": "The name of the person sending the email",
+    "form_link": "A private link where the candidate shares notice period and salary expectations",
 }
 _PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -38,7 +39,7 @@ def best_email(row: Dict[str, Any]) -> Optional[str]:
     return emails[0] if emails else None
 
 
-def candidate_values(row: Dict[str, Any], company_name: str = "", role_title: str = "", sender: str = "") -> Dict[str, str]:
+def candidate_values(row: Dict[str, Any], company_name: str = "", role_title: str = "", sender: str = "", form_link: str = "") -> Dict[str, str]:
     name = (row.get("name") or row.get("login") or "").strip()
     return {
         "first_name": name.split()[0] if name else "",
@@ -48,6 +49,7 @@ def candidate_values(row: Dict[str, Any], company_name: str = "", role_title: st
         "company_name": company_name,
         "role_title": role_title,
         "sender": sender,
+        "form_link": form_link,
     }
 
 
@@ -60,9 +62,13 @@ def render(subject: str, body: str, values: Dict[str, str]) -> Tuple[str, str]:
     return fill(subject, values).strip(), fill(body, values).strip()
 
 
-def render_draft(row: Dict[str, Any], outreach: Dict[str, str], sender: str = "", company_name: str = "") -> Tuple[str, str]:
+def uses_form_link(*texts: str) -> bool:
+    return any("{form_link}" in (t or "") for t in texts)
+
+
+def render_draft(row: Dict[str, Any], outreach: Dict[str, str], sender: str = "", company_name: str = "", form_link: str = "") -> Tuple[str, str]:
     """Return (subject, body) for one candidate from a {role_title, subject, body} dict."""
-    values = candidate_values(row, company_name, outreach.get("role_title", ""), sender)
+    values = candidate_values(row, company_name, outreach.get("role_title", ""), sender, form_link)
     return render(outreach["subject"], outreach["body"], values)
 
 

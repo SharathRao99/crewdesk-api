@@ -2,11 +2,13 @@ from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
-from sourcer import roles_store
+from sourcer import roles_store, screening
 from sourcer.api import queries
 from sourcer.api.deps import Context, audit, get_context
 from sourcer.enrich import location_ok
+from sourcer.outreach import uses_form_link
 from sourcer.export import csv_bytes, has_contact, has_useful_link, prepare, xlsx_bytes
+from sourcer.outreach import best_email
 from sourcer.store import STATUSES
 
 router = APIRouter(tags=["export"])
@@ -38,9 +40,14 @@ def export(
     except KeyError:
         pass
     outreach = queries.resolve_outreach(ctx.db, role, template_id)
-    prepared = prepare(rows, outreach, sender.strip(), KEEP[require], ctx.tenant_name)
+    kept = [r for r in rows if KEEP[require](r)]
+    form_links = {}
+    if uses_form_link(outreach["subject"], outreach["body"]):  # one open link per person with an email, reused if it exists
+        form_links = {r["_id"]: screening.url_for(ctx.tenant, screening.get_or_create_link(ctx.db, r, ctx.user["email"]))
+                      for r in kept if best_email(r)}
+    prepared = prepare(kept, outreach, sender.strip(), KEEP["none"], ctx.tenant_name, form_links, queries.role_budget(ctx.db, role))
 
-    audit(ctx, "export", {"role": role, "format": format, "rows": len(prepared), "require": require})
+    audit(ctx, "export", {"role": role, "format": format, "rows": len(prepared), "require": require, "form_links": len(form_links)})
     if format == "csv":
         data, media = csv_bytes(prepared), "text/csv; charset=utf-8"
     else:

@@ -43,3 +43,16 @@ def list_roles(db: Database) -> List[Dict[str, Any]]:
 
 def set_default_template(db: Database, name: str, template_id: str | None) -> bool:
     return db["roles"].update_one({"_id": name}, {"$set": {"default_template_id": template_id}}).matched_count == 1
+
+
+def set_budget(db: Database, name: str, minimum: float | None, maximum: float, stretch_max: float | None) -> bool:
+    """Set what the company can pay for a role, in lakh per annum. Verdicts on answers follow it."""
+    from sourcer.screening import validate_budget
+
+    validate_budget(minimum, maximum, stretch_max)
+    budget = {"min": minimum, "max": maximum, "stretch_max": stretch_max}
+    return db["roles"].update_one({"_id": name}, {"$set": {"budget": budget, "updated_at": _now()}}).matched_count == 1
+
+
+def clear_budget(db: Database, name: str) -> bool:
+    return db["roles"].update_one({"_id": name}, {"$unset": {"budget": ""}}).matched_count == 1
