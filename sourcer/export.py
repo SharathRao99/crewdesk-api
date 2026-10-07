@@ -54,7 +54,7 @@ def prepare(
             row.update(expected_ctc=answers["expected_ctc"], current_ctc=answers["current_ctc"], notice_days=answers["notice_days"],
                        budget_verdict=verdict(answers["expected_ctc"], budget))
         if outreach and row["email_to"]:
-            row["email_subject"], row["email_message"] = render_draft(row, outreach, sender, company_name, (form_links or {}).get(row["_id"], ""))
+            row["email_subject"], row["email_message"] = render_draft(row, outreach, sender, company_name, (form_links or {}).get(row.get("_id"), ""))
             row.update(mail_links(row["email_to"], row["email_subject"], row["email_message"]))
         out.append(flatten(row))
     return out
