@@ -10,11 +10,11 @@ from typing import List
 from dotenv import load_dotenv
 
 from sourcer.discover import discover
-from sourcer.enrich import enrich, location_ok
+from sourcer.enrich import location_ok
+from sourcer.pipeline import evaluate
 from sourcer.export import has_contact, has_useful_link, write_csv, write_xlsx
 from sourcer.github import GitHubClient
 from sourcer.role import load_role
-from sourcer.scoring import meets_primary_skill, score
 
 logger = logging.getLogger("sourcer")
 
@@ -53,7 +53,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             if i % 25 == 0:
                 logger.info(f"Processed {i}/{len(logins)} ({len(rows)} kept, {skipped_primary} not primary skill)")
             try:
-                candidate = enrich(client, role, login)
+                outcome, row = evaluate(client, role, login)
             except Exception as e:  # one bad profile must not kill a long run
                 errors += 1
                 consecutive_errors += 1
@@ -62,13 +62,10 @@ def cmd_run(args: argparse.Namespace) -> None:
                     raise RuntimeError("10 candidates failed in a row; aborting. Saved progress is kept.") from e
                 continue
             consecutive_errors = 0
-            if not candidate or candidate.public_repos < role.min_public_repos:
-                continue
-            if not meets_primary_skill(candidate, role):
+            if outcome == "not_primary":
                 skipped_primary += 1
+            if row is None:
                 continue
-            breakdown = score(candidate, role)
-            row = {**asdict(candidate), "score": breakdown["total"], "score_breakdown": breakdown}
             rows.append(row)
             pending.append(row)
             if collection is not None and len(pending) >= 25:  # checkpoint so a crash loses little
@@ -183,6 +180,12 @@ def cmd_report(args: argparse.Namespace) -> None:
     print(f"Wrote {count} candidates to {args.output}")
 
 
+def cmd_worker(args: argparse.Namespace) -> None:
+    from sourcer.worker import main as worker_main
+
+    worker_main(args.poll)
+
+
 def cmd_api(args: argparse.Namespace) -> None:
     import uvicorn
 
@@ -247,6 +250,10 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--min-score", type=float, default=0)
     rp.set_defaults(func=cmd_report)
 
+    wk = sub.add_parser("worker", help="run queued sourcing jobs in the background")
+    wk.add_argument("--poll", type=float, default=5.0, help="seconds to wait between looks at the queue")
+    wk.set_defaults(func=cmd_worker)
+
     ap = sub.add_parser("api", help="start the JSON API used by the web app")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8001)
@@ -267,6 +274,6 @@ def main(argv: List[str] = None) -> None:
     args = build_parser().parse_args(argv)
     if args.tenant:
         os.environ["SOURCER_TENANT"] = args.tenant
-    if args.command != "serve" and args.command != "api" and not args.tenant:
+    if args.command not in ("serve", "api", "worker") and not args.tenant:
         sys.exit("No tenant: pass --tenant <slug> or set SOURCER_TENANT. Create one with: sourcer-admin tenant create <slug> --name <name>")
     args.func(args)

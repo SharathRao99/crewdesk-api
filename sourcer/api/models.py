@@ -234,3 +234,69 @@ class DeletedOut(BaseModel):
     events: int
     links: int
     responses: int
+
+
+class RoleDefinition(BaseModel):
+    name: str
+    languages: List[str]
+    keywords: List[str] = []
+    locations: List[str]
+    exclude_locations: List[str] = []
+    min_years: float = 0
+    max_years: float = 50
+    min_public_repos: int = 0
+    active_within_months: int = 12
+    min_language_share: float = 0.0
+    min_keyword_repos: int = 0
+    manifest_file: Optional[str] = None
+    manifest_contains: List[str] = []
+    role_title: Optional[str] = None
+    budget: Optional[BudgetIn] = None
+
+
+class RoleDefinitionOut(RoleDefinition):
+    budget: Optional[BudgetOut] = None  # type: ignore[assignment]
+    candidates: int = 0
+
+
+class JobCreate(BaseModel):
+    role: str
+    pages: int = Field(default=2, ge=1, le=5)
+    max_candidates: int = Field(default=0, ge=0, le=5000)
+    remove_stale: bool = False
+
+
+class JobOut(BaseModel):
+    id: str
+    role: str
+    status: str  # queued | running | paused | cancelled | failed | done
+    control: Optional[str] = None  # pause | cancel: asked for, not yet done
+    phase: str
+    total: int
+    cursor: int
+    kept: int
+    not_primary: int
+    dropped: int
+    errors: int
+    contacts_total: int
+    contacts_done: int
+    removed: int
+    note: Optional[str] = None
+    error: Optional[str] = None
+    pages: int
+    max_candidates: int
+    remove_stale: bool
+    created_by: str
+    created_at: str
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+
+
+class JobEventOut(BaseModel):
+    level: str
+    message: str
+    at: str
+
+
+class JobDetail(JobOut):
+    events: List[JobEventOut] = []

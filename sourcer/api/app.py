@@ -9,7 +9,7 @@ from typing import Dict
 
 from fastapi import FastAPI
 
-from sourcer.api.routes import auth, candidates, export, public, roles, templates
+from sourcer.api.routes import auth, candidates, export, jobs, public, roles, templates
 
 app = FastAPI(title="Talent Sourcer API", version="0.2.0")
 
@@ -19,5 +19,5 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-for module in (auth, candidates, roles, templates, export, public):
+for module in (auth, candidates, roles, jobs, templates, export, public):
     app.include_router(module.router)

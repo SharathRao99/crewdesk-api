@@ -1,7 +1,7 @@
 """Roles stored per tenant (the YAML profile, as a document)."""
 
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
 from pymongo.database import Database
@@ -56,3 +56,105 @@ def set_budget(db: Database, name: str, minimum: float | None, maximum: float, s
 
 def clear_budget(db: Database, name: str) -> bool:
     return db["roles"].update_one({"_id": name}, {"$unset": {"budget": ""}}).matched_count == 1
+
+
+# ---------- creating and editing roles (the role builder) ----------
+
+import re
+
+NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$")  # used in URLs and in candidate ids, so it stays simple
+LIMITS = {"languages": (1, 5), "keywords": (0, 15), "locations": (1, 30), "exclude_locations": (0, 30), "manifest_contains": (0, 5)}
+
+
+class RoleExists(Exception):
+    pass
+
+
+def _clean_list(name: str, values: List[str]) -> List[str]:
+    seen, out = set(), []
+    for raw in values:
+        value = " ".join((raw or "").split())
+        if not value or value.lower() in seen:
+            continue
+        if len(value) > 60:
+            raise ValueError(f"'{value[:20]}...' is too long (60 characters at most)")
+        seen.add(value.lower())
+        out.append(value)
+    low, high = LIMITS[name]
+    if not low <= len(out) <= high:
+        label = name.replace("_", " ")
+        raise ValueError(f"Give between {low} and {high} {label}" if low else f"At most {high} {label}")
+    return out
+
+
+def definition_to_data(defn: Dict[str, Any], existing: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """Validate the builder's fields and turn them into the stored profile.
+
+    Anything the builder does not edit (score weights, other email defaults) is kept from `existing`.
+    """
+    name = (defn.get("name") or "").strip()
+    if not NAME_RE.match(name):
+        raise ValueError("The name must be 3-50 characters: lowercase letters, digits and hyphens, for example laravel-dev-pune")
+    low, high = defn["min_years"], defn["max_years"]
+    if not 0 <= low <= high <= 50:
+        raise ValueError("Experience must run from a lower number up to a higher one, within 0 to 50 years")
+    if not 0 <= defn["min_language_share"] <= 1:
+        raise ValueError("The share of repos in the main language must be between 0 and 100%")
+    if not (0 <= defn["min_public_repos"] <= 100 and 0 <= defn["min_keyword_repos"] <= 20 and 1 <= defn["active_within_months"] <= 60):
+        raise ValueError("A number is outside its allowed range")
+
+    data = dict(existing or {})
+    data.update(
+        name=name,
+        languages=_clean_list("languages", defn["languages"]),
+        keywords=[k.lower() for k in _clean_list("keywords", defn["keywords"])],
+        locations=_clean_list("locations", defn["locations"]),
+        exclude_locations=_clean_list("exclude_locations", defn.get("exclude_locations") or []),
+        experience={"min_years": low, "max_years": high},
+        signals={"min_public_repos": defn["min_public_repos"], "active_within_months": defn["active_within_months"]},
+    )
+    primary: Dict[str, Any] = {"min_language_share": defn["min_language_share"], "min_keyword_repos": defn["min_keyword_repos"]}
+    manifest_file = (defn.get("manifest_file") or "").strip()
+    contains = _clean_list("manifest_contains", defn.get("manifest_contains") or [])
+    if manifest_file and contains:
+        primary["manifest"] = {"file": manifest_file[:60], "contains": contains}
+    data["primary_skill"] = primary
+    title = (defn.get("role_title") or "").strip()
+    if title:
+        data["outreach"] = {**(data.get("outreach") or {}), "role_title": title[:80]}
+    elif data.get("outreach"):
+        data["outreach"] = {k: v for k, v in data["outreach"].items() if k != "role_title"} or None
+        if data["outreach"] is None:
+            data.pop("outreach")
+    role_from_dict(data)  # the same check the worker will make
+    return data
+
+
+def data_to_definition(data: Dict[str, Any]) -> Dict[str, Any]:
+    role = role_from_dict(data)
+    return {
+        "name": role.name, "languages": role.languages, "keywords": role.keywords, "locations": role.locations,
+        "exclude_locations": role.exclude_locations, "min_years": role.min_years, "max_years": role.max_years,
+        "min_public_repos": role.min_public_repos, "active_within_months": role.active_within_months,
+        "min_language_share": role.min_language_share, "min_keyword_repos": role.min_keyword_repos,
+        "manifest_file": role.manifest_file, "manifest_contains": role.manifest_contains,
+        "role_title": role.outreach.get("role_title"),
+    }
+
+
+def create_role(db: Database, defn: Dict[str, Any]) -> Dict[str, Any]:
+    data = definition_to_data(defn)
+    if db["roles"].find_one({"_id": data["name"]}):
+        raise RoleExists(data["name"])
+    db["roles"].insert_one({"_id": data["name"], "name": data["name"], "data": data, "default_template_id": None,
+                            "created_at": _now(), "updated_at": _now()})
+    return db["roles"].find_one({"_id": data["name"]})
+
+
+def update_role(db: Database, name: str, defn: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    doc = db["roles"].find_one({"_id": name})
+    if not doc:
+        return None
+    data = definition_to_data({**defn, "name": name}, existing=doc["data"])
+    db["roles"].update_one({"_id": name}, {"$set": {"data": data, "updated_at": _now()}})
+    return db["roles"].find_one({"_id": name})

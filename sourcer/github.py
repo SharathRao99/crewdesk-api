@@ -3,7 +3,7 @@
 import logging
 import os
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 import httpx
 
@@ -14,8 +14,20 @@ MAX_NETWORK_RETRIES = 12
 SEARCH_DELAY_SECONDS = 2.2  # authenticated search limit is 30 requests/min
 
 
+class Interrupted(Exception):
+    """The caller asked the client to stop (a paused or cancelled job, or a worker shutting down)."""
+
+
 class GitHubClient:
-    def __init__(self, token: Optional[str] = None):
+    def __init__(
+        self,
+        token: Optional[str] = None,
+        on_wait: Optional[Callable[[str, float], None]] = None,
+        interrupt: Optional[Callable[[], bool]] = None,
+    ):
+        """`on_wait(reason, seconds)` is told before a long sleep; `interrupt()` is polled so a sleep can end early."""
+        self._on_wait = on_wait
+        self._interrupt = interrupt
         token = token or os.getenv("GITHUB_TOKEN")
         headers = {
             "Accept": "application/vnd.github+json",
@@ -28,6 +40,19 @@ class GitHubClient:
             logger.warning("GITHUB_TOKEN not set: expect very low rate limits")
         self._http = httpx.Client(base_url=API, headers=headers, timeout=30)
 
+    def _check(self) -> None:
+        if self._interrupt and self._interrupt():
+            raise Interrupted()
+
+    def _sleep(self, seconds: float, reason: str) -> None:
+        """Sleep in short slices so a pause or cancel is noticed within a couple of seconds."""
+        if seconds >= 5 and self._on_wait:
+            self._on_wait(reason, seconds)
+        end = time.monotonic() + seconds
+        while (remaining := end - time.monotonic()) > 0:
+            self._check()
+            time.sleep(min(2.0, remaining))
+
     def close(self) -> None:
         self._http.close()
 
@@ -39,6 +64,7 @@ class GitHubClient:
         """
         rate_limited = network_failures = 0
         while True:
+            self._check()
             try:
                 response = self._http.get(path, params=params)
             except httpx.TransportError as e:
@@ -47,11 +73,11 @@ class GitHubClient:
                     raise
                 wait = min(15 * network_failures, 300)
                 logger.warning(f"Network error on {path} ({e.__class__.__name__}); retry {network_failures} in {wait}s")
-                time.sleep(wait)
+                self._sleep(wait, "network")
                 continue
             network_failures = 0
             if search:
-                time.sleep(SEARCH_DELAY_SECONDS)
+                self._sleep(SEARCH_DELAY_SECONDS, "search")
 
             if response.status_code == 404:
                 return None
@@ -61,7 +87,7 @@ class GitHubClient:
                     raise RuntimeError(f"Gave up on {path} after repeated rate limiting")
                 wait = self._wait_seconds(response)
                 logger.warning(f"Rate limited, sleeping {wait:.0f}s (attempt {rate_limited})")
-                time.sleep(wait)
+                self._sleep(wait, "rate limit")
                 continue
             response.raise_for_status()
             return response.json()
