@@ -5,8 +5,10 @@ Usage (done by the web repo's Playwright config):
     PLATFORM_DB=e2e_platform TENANT_DB_PREFIX=e2e_t_ python scripts/seed_e2e.py
 """
 
+import json
 import os
 import sys
+from datetime import datetime, timedelta, timezone
 
 PROJECTS = ("phone", "tablet", "desktop")  # one user per browser project, so parallel tests never share a password
 INITIAL_PASSWORD = "Initial-Pass-123"
@@ -20,7 +22,42 @@ def role_for(project: str) -> dict:
     }
 
 
+def trash_role_for(project: str) -> dict:
+    # A role of its own holding one person the delete test removes, so nothing else is disturbed.
+    return {**role_for(project), "name": f"php-dev-{project}-trash"}
+
+
 COMPANIES = (("e2e-a", "Alpha Co", ("ann", "bob", "cy")), ("e2e-b", "Beta Co", ("zed",)))
+
+
+def seed_screening(db, slug: str, tokens: dict) -> None:
+    """Cy has already answered the form; Bob has an expired link; plus a throwaway role to delete from."""
+    from sourcer import roles_store, screening
+
+    now = datetime.now(timezone.utc)
+    for project in PROJECTS:
+        role = role_for(project)["name"]
+        cy_id, bob_id = f"{role}:cy", f"{role}:bob"
+        used = {"candidate_id": cy_id, "role": role, "login": "cy", "created_by": "seed", "created_at": now - timedelta(days=2),
+                "expires_at": now + timedelta(days=12), "used_at": now - timedelta(days=1), "opened_at": now - timedelta(days=1), "revoked": False}
+        used_id = db["screening_links"].insert_one(used).inserted_id
+        db["screening_responses"].insert_one({"link_id": used_id, "candidate_id": cy_id, "role": role, "login": "cy", "current_ctc": 10.0,
+                                              "expected_ctc": 14.0, "notice_days": 30, "comment": "Happy to relocate", "consent": True,
+                                              "consent_version": screening.CONSENT_VERSION, "submitted_at": now - timedelta(days=1)})
+        db["candidates"].update_one({"_id": cy_id}, {"$set": {"status": "replied", "screening": {"current_ctc": 10.0, "expected_ctc": 14.0, "notice_days": 30, "answered_at": now - timedelta(days=1)}}})
+        expired = {"candidate_id": bob_id, "role": role, "login": "bob", "created_by": "seed", "created_at": now - timedelta(days=30),
+                   "expires_at": now - timedelta(days=16), "used_at": None, "opened_at": None, "revoked": False}
+        expired_id = db["screening_links"].insert_one(expired).inserted_id
+        tokens[project] = {"answered": screening.make_token(slug, used_id), "expired": screening.make_token(slug, expired_id)}
+
+        trash = trash_role_for(project)
+        roles_store.import_role(db, trash)
+        for login, name in (("temp", "Temp"), ("form", "Form")):  # temp is deleted by one test, form answers the form in another
+            db["candidates"].insert_one({
+                "_id": f"{trash['name']}:{login}", "role": trash["name"], "login": login, "name": name, "score": 50, "status": "new", "notes": "",
+                "location": "Bengaluru, India", "est_years": 3.0, "language_share": 0.5, "keyword_repos": 3, "language_repos": 5,
+                "matching_repos": [f"{login}-shop"], "last_active": "2026-09-01", "url": f"https://github.com/{login}", "email": f"{login}@example.com",
+                "public_repos": 10, "followers": 1})
 
 
 def main() -> None:
@@ -34,6 +71,7 @@ def main() -> None:
     client().drop_database(platform_db().name)
     for slug, _, _ in COMPANIES:
         client().drop_database(tenant_db_name(slug))
+    tokens: dict = {}
 
     for slug, name, logins in COMPANIES:
         registry.create_tenant(slug, name)
@@ -51,6 +89,8 @@ def main() -> None:
                     **({"linkedin_url": f"https://www.linkedin.com/in/{login}", "portfolio_phones": ["+919876543210"]} if login == "ann" else {}),
                     **({"portfolio_url": f"https://{login}.example.dev"} if login == "bob" else {}),
                 })
+        if slug == "e2e-a":
+            seed_screening(db, slug, tokens)
         for project in PROJECTS:
             # hr-*: a fresh account that must change its password (only the password-change test uses it)
             registry.create_user(f"hr-{project}@{slug}.test", slug, "admin", INITIAL_PASSWORD)
@@ -58,6 +98,14 @@ def main() -> None:
             ready = f"ready-{project}@{slug}.test"
             registry.create_user(ready, slug, "admin", INITIAL_PASSWORD)
             registry.change_password(ready, INITIAL_PASSWORD, READY_PASSWORD)
+            if slug == "e2e-a":  # a non-admin, to show only administrators can delete people
+                rec = f"recruiter-{project}@{slug}.test"
+                registry.create_user(rec, slug, "recruiter", INITIAL_PASSWORD)
+                registry.change_password(rec, INITIAL_PASSWORD, READY_PASSWORD)
+    out = os.getenv("E2E_SEED_OUT")
+    if out:
+        with open(out, "w") as f:
+            json.dump(tokens, f)
     print("seeded", ", ".join(slug for slug, _, _ in COMPANIES))
 
 

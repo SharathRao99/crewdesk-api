@@ -29,6 +29,11 @@ class Context:
     db: Database
 
 
+def _session_ended(detail: str) -> HTTPException:
+    """401 plus a marker: the web server ends the signed-in session. A plain 403 means "not allowed" and does not."""
+    return HTTPException(401, detail, headers={"X-Session": "ended"})
+
+
 def get_context(
     _: None = Depends(require_service_key),
     x_tenant: Optional[str] = Header(default=None),
@@ -39,12 +44,12 @@ def get_context(
     user = registry.get_user_by_id(x_user_id)
     # A session for tenant A must never be usable against tenant B, even with a valid key.
     if not user or user.get("disabled") or user["tenant"] != x_tenant:
-        raise HTTPException(403, "User does not belong to this tenant")
+        raise _session_ended("User does not belong to this tenant")
     try:
         db = tenant_db(x_tenant)
         name = registry.get_tenant(x_tenant)["name"]
     except TenantError:
-        raise HTTPException(403, "Tenant unavailable") from None
+        raise _session_ended("Tenant unavailable") from None
     return Context(tenant=x_tenant, tenant_name=name, user=user, db=db)
 
 

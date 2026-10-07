@@ -128,3 +128,12 @@ Mobile is a requirement for the recruiter app too, and the public form is design
 - `pnpm typecheck` runs `next typegen` first, because route types (`LayoutProps`) are generated into `.next/`.
 - Browser tests use seeded `ready-*` accounts. An earlier helper tried a wrong password on purpose and triggered the 5-attempt lockout, which is a good sign for the lockout and a bad design for the test.
 - `/s/*` (the public screening form, Phase 2) must be added as a signed-out route in `proxy.ts` when it is built.
+
+## Phase 2 findings
+
+- **The browser tests run against a production build** (`next build` then `next start`), not the dev server. It is faster (nothing compiles mid-test), uses less disk, sends the real headers (`Cache-Control: no-store` on the form), and it exposed a bug dev mode hid: Node's `fetch` throws "expected non-null body source" when a request with a *stream* body gets a **401**. openapi-fetch builds such requests, so a wrong password showed "Sign-in is unavailable". `serverApi` now uses `plainFetch`, which sends a string body (and never lets Next cache the call).
+- **"Session ended" is a marker, not a status code.** The API answers 401 with `X-Session: ended` only when the user or company is no longer valid, and the proxy signs the person out on that alone. A plain 403 means "not allowed" and leaves them signed in (an early version signed people out for being refused an admin-only action).
+- **Forms validate on change and show errors only on touched fields.** With only `onSubmit` validation, TanStack Form will not re-validate a second Send while stale errors remain on fields the user did not touch.
+- The candidate form (`/s/<token>`) is public and phone-first: no menu, no company data, honeypot field, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`, `Cache-Control: no-store`. `proxy.ts` lets `/s/*` through signed out; the API proxy allows only `GET`/`POST` on `public/screening/<token>` and adds no user or company headers there.
+- Opening a draft whose template contains `{form_link}` creates that candidate's link (it is reused afterwards). Do not set such a template as a role default in tests: it gives every opened candidate a link.
+- Each browser project owns its own role and candidates in the seed, so parallel tests never share data.

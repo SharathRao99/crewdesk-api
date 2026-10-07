@@ -180,14 +180,14 @@ def test_api_tenant_isolation(api, two_tenants):
     assert [c["login"] for c in api.get("/candidates", headers=H("globex", g["user_id"])).json()["items"]] == ["globex-dev"]
     # Acme's user presenting Globex as the tenant is refused, not served Globex's data.
     crossed = api.get("/candidates", headers=H("globex", a["user_id"]))
-    assert crossed.status_code == 403 and "globex-dev" not in crossed.text
+    assert crossed.status_code == 401 and crossed.headers["x-session"] == "ended" and "globex-dev" not in crossed.text
 
 
 def test_api_rejects_bad_identity(api, two_tenants):
     a = two_tenants["acme"]
-    assert api.get("/candidates", headers=H("acme", "not-an-id")).status_code == 403
-    assert api.get("/candidates", headers=H("acme", "0" * 24)).status_code == 403
-    assert api.get("/candidates", headers=H("nope", a["user_id"])).status_code == 403
+    assert api.get("/candidates", headers=H("acme", "not-an-id")).status_code == 401
+    assert api.get("/candidates", headers=H("acme", "0" * 24)).status_code == 401
+    assert api.get("/candidates", headers=H("nope", a["user_id"])).status_code == 401
     assert api.get("/candidates", headers={"X-Service-Key": KEY}).status_code == 400
 
 
@@ -207,3 +207,11 @@ def test_import_v0_copies_candidates_into_tenant(mongo):
     admin._tenant_import(argparse.Namespace(slug="acme", from_db=legacy))  # re-running is safe
     assert tenant_db("acme")["candidates"].count_documents({}) == 2
     assert client()[legacy]["candidates"].count_documents({}) == 2  # source untouched
+
+
+def test_a_disabled_user_gets_the_session_ended_marker(api, two_tenants):
+    from sourcer.tenancy import registry
+
+    registry.set_disabled(two_tenants["acme"]["email"], True)
+    res = api.get("/me", headers=H("acme", two_tenants["acme"]["user_id"]))
+    assert res.status_code == 401 and res.headers["x-session"] == "ended"

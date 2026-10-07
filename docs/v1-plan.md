@@ -88,7 +88,7 @@ Done when: two tenants exist locally and a test proves tenant A cannot read tena
 
 Done when: a recruiter at tenant A signs in, reviews candidates, uses a saved template to open a draft with clickable links, changes statuses, and a colleague sees it; tenant B sees none of it.
 
-### Phase 2: Screening form (M)
+### Phase 2: Screening form (M) — built
 - Role budget (HR enters it on the requirement, before or while starting a run; a small role-settings form covers this until the full builder in Phase 3). `{form_link}` in templates.
 - Public page `/s/<token>`: privacy notice and consent checkbox, current CTC, expected CTC, notice period, submit. No login. Token expires and is single use.
 - Responses on the candidate detail with **within budget / stretch / over budget**, worked out when the page is viewed from the role's *current* budget, so changing the budget updates every existing answer. GitHub has no salary data, so the budget does not filter the scrape itself; it only judges the answers.
@@ -135,3 +135,11 @@ All of `sourcer/`: discovery, enrichment, scoring and explanation, portfolio cra
 ## Still open
 
 Nothing blocking. The budget for each role is entered by HR in the app, so it is not needed to build anything.
+
+
+## Status
+
+- Phase 0 (foundation) and Phase 1 (login, candidates, templates) are built.
+- **Phase 2 is built:** signed single-use links (14 days), the public form (current and expected salary, notice period, consent), answers shown on the candidate with a within/stretch/over verdict from the role's current budget, list filters and sorting, `{form_link}` in templates and exports, role budgets (Roles page), admin-only deletion of a candidate and everything held about them, and the 180-day retention command (`sourcer-admin retention run`).
+- Not yet scheduled: running the retention command automatically. Run it from cron or a job runner once hosting exists.
+- Next: Phase 3 (role builder and sourcing runs with a worker, resumable).

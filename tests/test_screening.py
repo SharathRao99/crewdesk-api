@@ -339,7 +339,8 @@ def test_deleting_a_candidate_removes_everything_and_needs_an_admin(api, seeded)
 
     recruiter, _ = registry.create_user("rec@acme.com", "acme", "recruiter")
     rh = {**h, "X-User-Id": str(recruiter["_id"])}
-    assert api.delete(f"/candidates/{ROLE}/ann", headers=rh).status_code == 403
+    refused = api.delete(f"/candidates/{ROLE}/ann", headers=rh)
+    assert refused.status_code == 403 and "x-session" not in refused.headers  # "not allowed" must not end their session
     assert api.get(f"/candidates/{ROLE}/ann", headers=h).status_code == 200  # still there
 
     res = api.delete(f"/candidates/{ROLE}/ann", headers=h)
