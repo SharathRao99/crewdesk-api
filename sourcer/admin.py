@@ -1,0 +1,101 @@
+"""`sourcer-admin`: create companies and users, set their GitHub token, migrate v0 data."""
+
+import argparse
+import getpass
+import os
+import sys
+
+from dotenv import load_dotenv
+
+from sourcer.tenancy import crypto, registry
+from sourcer.tenancy.db import TenantError, client, tenant_db
+
+
+def _tenant_create(a):
+    t = registry.create_tenant(a.slug, a.name)
+    print(f"Created tenant {t['slug']!r} ({t['name']}).")
+    print(f"Next: sourcer-admin tenant set-github-token {a.slug}   and   sourcer-admin user create --tenant {a.slug} --email you@company.com --role admin")
+
+
+def _tenant_list(a):
+    for t in registry.list_tenants():
+        print(f"{t['slug']:<20} {t['status']:<8} {t['name']}")
+
+
+def _tenant_token(a):
+    token = os.getenv("GITHUB_TOKEN_FOR_TENANT") or getpass.getpass(f"GitHub token for {a.slug} (input hidden): ")
+    if not token.strip():
+        sys.exit("No token entered")
+    registry.set_github_token(a.slug, token)
+    print(f"Stored (encrypted) GitHub token for {a.slug!r}.")
+
+
+def _tenant_delete(a):
+    if a.confirm != a.slug:
+        sys.exit(f"This permanently deletes the tenant's database and users. Re-run with --confirm {a.slug}")
+    registry.delete_tenant(a.slug)
+    print(f"Deleted tenant {a.slug!r}.")
+
+
+def _tenant_import(a):
+    """Copy candidates from the single-company v0 database into a tenant."""
+    source = client()[a.from_db]["candidates"]
+    target = tenant_db(a.slug)["candidates"]
+    copied = 0
+    for doc in source.find({}):
+        target.replace_one({"_id": doc["_id"]}, doc, upsert=True)
+        copied += 1
+    print(f"Copied {copied} candidates from {a.from_db!r} into tenant {a.slug!r} (source left untouched).")
+
+
+def _user_create(a):
+    user, password = registry.create_user(a.email, a.tenant, a.role, a.password)
+    print(f"Created {user['role']} {user['email']} in {a.tenant!r}.")
+    print(f"One-time password (shown once, must be changed at first login): {password}")
+
+
+def _user_list(a):
+    for u in registry.list_users(a.tenant):
+        flag = " (disabled)" if u.get("disabled") else ""
+        print(f"{u['email']:<35} {u['tenant']:<15} {u['role']}{flag}")
+
+
+def _user_reset(a):
+    print(f"New one-time password for {a.email}: {registry.reset_password(a.email)}")
+
+
+def _user_disable(a):
+    registry.set_disabled(a.email, not a.enable)
+    print(f"{a.email} {'enabled' if a.enable else 'disabled'}.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="sourcer-admin", description=__doc__)
+    sub = parser.add_subparsers(dest="group", required=True)
+
+    sub.add_parser("generate-key", help="print a new SECRETS_KEY").set_defaults(func=lambda a: print(crypto.generate_key()))
+
+    tenant = sub.add_parser("tenant").add_subparsers(dest="cmd", required=True)
+    p = tenant.add_parser("create"); p.add_argument("slug"); p.add_argument("--name", required=True); p.set_defaults(func=_tenant_create)
+    tenant.add_parser("list").set_defaults(func=_tenant_list)
+    p = tenant.add_parser("set-github-token"); p.add_argument("slug"); p.set_defaults(func=_tenant_token)
+    p = tenant.add_parser("delete"); p.add_argument("slug"); p.add_argument("--confirm", default=""); p.set_defaults(func=_tenant_delete)
+    p = tenant.add_parser("import-v0", help="copy candidates from the old single-company database")
+    p.add_argument("slug"); p.add_argument("--from-db", default="talent_sourcer"); p.set_defaults(func=_tenant_import)
+
+    user = sub.add_parser("user").add_subparsers(dest="cmd", required=True)
+    p = user.add_parser("create"); p.add_argument("--tenant", required=True); p.add_argument("--email", required=True)
+    p.add_argument("--role", choices=registry.ROLES, default="recruiter"); p.add_argument("--password", help="omit to generate one"); p.set_defaults(func=_user_create)
+    p = user.add_parser("list"); p.add_argument("--tenant"); p.set_defaults(func=_user_list)
+    p = user.add_parser("reset-password"); p.add_argument("--email", required=True); p.set_defaults(func=_user_reset)
+    p = user.add_parser("disable"); p.add_argument("--email", required=True); p.add_argument("--enable", action="store_true"); p.set_defaults(func=_user_disable)
+    return parser
+
+
+def main(argv=None) -> None:
+    load_dotenv()
+    args = build_parser().parse_args(argv)
+    try:
+        args.func(args)
+    except (TenantError, ValueError, RuntimeError) as e:
+        sys.exit(f"Error: {e}")

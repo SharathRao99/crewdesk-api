@@ -2,6 +2,7 @@
 
 import argparse
 import logging
+import os
 import sys
 from dataclasses import asdict
 from typing import List
@@ -18,6 +19,17 @@ from sourcer.scoring import meets_primary_skill, score
 logger = logging.getLogger("sourcer")
 
 
+def _github_client() -> GitHubClient:
+    """Client using the tenant's own GitHub token if one is set, else $GITHUB_TOKEN."""
+    tenant = os.getenv("SOURCER_TENANT")
+    token = None
+    if tenant:
+        from sourcer.tenancy.registry import get_github_token
+
+        token = get_github_token(tenant)
+    return GitHubClient(token)
+
+
 def cmd_run(args: argparse.Namespace) -> None:
     from datetime import datetime, timezone
 
@@ -31,7 +43,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     rows, pending, saved, skipped_primary = [], [], 0, 0
     errors = consecutive_errors = 0
-    client = GitHubClient()
+    client = _github_client()
     try:
         logins = sorted(discover(client, role, pages=args.pages))
         if args.max_candidates:
@@ -131,7 +143,7 @@ def cmd_contacts(args: argparse.Namespace) -> None:
         rows = rows[: args.limit]
     logger.info(f"Looking up contacts for {len(rows)} candidates")
 
-    client = GitHubClient()
+    client = _github_client()
     try:
         github = {}
         for row in rows:
@@ -171,6 +183,12 @@ def cmd_report(args: argparse.Namespace) -> None:
     print(f"Wrote {count} candidates to {args.output}")
 
 
+def cmd_api(args: argparse.Namespace) -> None:
+    import uvicorn
+
+    uvicorn.run("sourcer.api.app:app", host=args.host, port=args.port)
+
+
 def cmd_serve(args: argparse.Namespace) -> None:
     import uvicorn
 
@@ -181,6 +199,7 @@ def build_parser() -> argparse.ArgumentParser:
     from sourcer.store import STATUSES
 
     parser = argparse.ArgumentParser(prog="sourcer", description=__doc__)
+    parser.add_argument("--tenant", default=os.getenv("SOURCER_TENANT"), help="company slug (or set SOURCER_TENANT)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     run = sub.add_parser("run", help="discover, enrich, score and store candidates for a role file")
@@ -228,6 +247,11 @@ def build_parser() -> argparse.ArgumentParser:
     rp.add_argument("--min-score", type=float, default=0)
     rp.set_defaults(func=cmd_report)
 
+    ap = sub.add_parser("api", help="start the JSON API used by the web app")
+    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--port", type=int, default=8001)
+    ap.set_defaults(func=cmd_api)
+
     sv = sub.add_parser("serve", help="start the web UI")
     sv.add_argument("--host", default="127.0.0.1")
     sv.add_argument("--port", type=int, default=8000)
@@ -241,4 +265,8 @@ def main(argv: List[str] = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     logging.getLogger("httpx").setLevel(logging.WARNING)
     args = build_parser().parse_args(argv)
+    if args.tenant:
+        os.environ["SOURCER_TENANT"] = args.tenant
+    if args.command != "serve" and args.command != "api" and not args.tenant:
+        sys.exit("No tenant: pass --tenant <slug> or set SOURCER_TENANT. Create one with: sourcer-admin tenant create <slug> --name <name>")
     args.func(args)

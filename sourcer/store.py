@@ -5,20 +5,22 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Iterable, List, Optional
 
 from dotenv import load_dotenv
-from pymongo import MongoClient, UpdateOne
+from pymongo import UpdateOne
 from pymongo.collection import Collection
+
+from sourcer.tenancy.db import tenant_db
 
 STATUSES = ("new", "contacted", "replied", "interviewing", "rejected", "hired")
 
 load_dotenv()
 
 
-def get_collection() -> Collection:
-    uri = os.getenv("MONGODB_URI")
-    if not uri:
-        raise RuntimeError("MONGODB_URI is not set (see .env.example), or use --dry-run")
-    db = MongoClient(uri)[os.getenv("MONGODB_DB", "talent_sourcer")]
-    return db["candidates"]
+def get_collection(tenant: Optional[str] = None) -> Collection:
+    """The tenant's candidates collection. Falls back to $SOURCER_TENANT for CLI use."""
+    tenant = tenant or os.getenv("SOURCER_TENANT")
+    if not tenant:
+        raise RuntimeError("No tenant: pass --tenant or set SOURCER_TENANT (create one with sourcer-admin tenant create)")
+    return tenant_db(tenant)["candidates"]
 
 
 def save_candidates(collection: Collection, role_name: str, rows: Iterable[Dict[str, Any]]) -> int:

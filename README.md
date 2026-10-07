@@ -11,6 +11,22 @@ cp .env.example .env   # add GITHUB_TOKEN (no scopes needed) and MONGODB_URI
 
 A `GITHUB_TOKEN` is effectively required: unauthenticated search allows ~10 requests/min and the run will mostly sit waiting.
 
+## Companies (tenants) and users
+
+Each company has its own MongoDB database plus a shared `platform` database for the company list and users. Create them with commands (there is no signup page):
+
+```bash
+sourcer-admin generate-key                       # put the output in .env as SECRETS_KEY
+sourcer-admin tenant create acme --name "Acme Inc"
+sourcer-admin tenant set-github-token acme       # prompts, stores encrypted
+sourcer-admin user create --tenant acme --email hr@acme.com --role admin   # prints a one-time password
+sourcer-admin user list --tenant acme
+sourcer-admin user reset-password --email hr@acme.com
+sourcer-admin tenant import-v0 acme              # copy candidates from the old single-company database
+```
+
+`sourcer` commands act on one company: pass `--tenant acme` or set `SOURCER_TENANT`. `sourcer api` starts the JSON API (port 8001) used by the web app; it needs `API_SERVICE_KEY`.
+
 ## Usage
 
 ```bash
