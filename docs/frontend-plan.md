@@ -137,3 +137,11 @@ Mobile is a requirement for the recruiter app too, and the public form is design
 - The candidate form (`/s/<token>`) is public and phone-first: no menu, no company data, honeypot field, `Referrer-Policy: no-referrer`, `X-Robots-Tag: noindex`, `Cache-Control: no-store`. `proxy.ts` lets `/s/*` through signed out; the API proxy allows only `GET`/`POST` on `public/screening/<token>` and adds no user or company headers there.
 - Opening a draft whose template contains `{form_link}` creates that candidate's link (it is reused afterwards). Do not set such a template as a role default in tests: it gives every opened candidate a link.
 - Each browser project owns its own role and candidates in the seed, so parallel tests never share data.
+
+## Phase 3 findings
+
+- **Role builder** (`/roles/new`, `/roles/<name>`): tags for list fields (Enter or comma adds, a pasted list is split), a live plain-language summary of the rules beside the form, and a rough time guide. Numbers are typed as text and converted on save (`toPayload`); the summary, validation and conversion are pure functions with unit tests.
+- **Runs are polled, not pushed.** `useJobs` refetches every 4 s while any run is active and every 30 s otherwise; the sidebar badge, the runs page and the finish notification all read the same query. `JobsWatcher` only records the first look, so old runs never trigger a message.
+- **Side effects belong in effects.** Showing a toast while rendering was flagged by the `react-hooks/refs` lint rule; the watcher now compares in `useEffect`.
+- **Browser tests have no worker.** Runs stay queued; the "finishes" test finishes one by writing to the test database from a small Python call (`finishRun` in `e2e/helpers.ts`), exactly what the worker's last step does.
+- **RAM disk for builds.** On this Mac the disk is nearly full, which stalled builds and databases. `scripts/ramdisk.sh` mounts a RAM disk *at* `.next-e2e` (or `.next`). A symlink does not work: Turbopack resolves packages (`@tailwindcss/postcss`) relative to the build output's real path.

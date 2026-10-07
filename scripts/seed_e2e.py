@@ -60,6 +60,33 @@ def seed_screening(db, slug: str, tokens: dict) -> None:
                 "public_repos": 10, "followers": 1})
 
 
+def seed_jobs(db, project: str) -> None:
+    """A finished run and a failed run on the main role, and a running one (waiting on GitHub) on the throwaway role."""
+    from sourcer import jobs
+
+    now = datetime.now(timezone.utc)
+    role, trash = role_for(project)["name"], trash_role_for(project)["name"]
+
+    done = jobs.create(db, role, {"pages": 2}, "seed@e2e-a.test")
+    db["jobs"].update_one({"_id": done["_id"]}, {"$set": {
+        "status": "done", "phase": "finished", "total": 10, "cursor": 10, "kept": 3, "not_primary": 4, "dropped": 2, "errors": 1,
+        "contacts_total": 3, "contacts_done": 3, "started_at": now - timedelta(hours=3), "finished_at": now - timedelta(hours=1)}})
+    for message in ("Found 10 possible people to check", "Checked everyone: 3 kept, 4 not mainly in the role's skill, 2 outside the role's places", "Finished"):
+        jobs.event(db, done["_id"], "info", message)
+
+    failed = jobs.create(db, role, {"pages": 2}, "seed@e2e-a.test")
+    db["jobs"].update_one({"_id": failed["_id"]}, {"$set": {
+        "status": "failed", "phase": "processing", "total": 50, "cursor": 12, "kept": 5, "errors": 10, "started_at": now - timedelta(hours=6),
+        "finished_at": now - timedelta(hours=5), "error": "10 people in a row failed, so the run stopped. Progress is kept."}})
+    jobs.event(db, failed["_id"], "error", "Stopped: 10 people in a row failed, so the run stopped. Progress is kept.")
+
+    running = jobs.create(db, trash, {"pages": 2}, "seed@e2e-a.test")
+    db["jobs"].update_one({"_id": running["_id"]}, {"$set": {
+        "status": "running", "phase": "processing", "total": 100, "cursor": 40, "kept": 12, "not_primary": 20, "dropped": 8,
+        "started_at": now - timedelta(minutes=30), "heartbeat_at": now,
+        "note": "Waiting on GitHub (rate limit) for about 20 min. This is normal."}})
+
+
 def main() -> None:
     if not os.getenv("PLATFORM_DB", "").startswith("e2e_") or not os.getenv("TENANT_DB_PREFIX", "").startswith("e2e_"):
         sys.exit("Refusing to seed: PLATFORM_DB and TENANT_DB_PREFIX must start with 'e2e_'")
@@ -91,6 +118,9 @@ def main() -> None:
                 })
         if slug == "e2e-a":
             seed_screening(db, slug, tokens)
+            registry.set_github_token(slug, "ghp_fake_token_for_tests_only")  # so runs can be queued; company B has none
+            for project in PROJECTS:
+                seed_jobs(db, project)
         for project in PROJECTS:
             # hr-*: a fresh account that must change its password (only the password-change test uses it)
             registry.create_user(f"hr-{project}@{slug}.test", slug, "admin", INITIAL_PASSWORD)
