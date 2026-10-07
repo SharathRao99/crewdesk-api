@@ -1,7 +1,8 @@
-"""Fill the role's email template for a candidate."""
+"""Email templates: placeholders, rendering, and mail links."""
 
+import re
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
-from typing import Any, Dict, List, Optional, Tuple
 
 DEFAULT_OUTREACH = {
     "role_title": "developer",
@@ -9,27 +10,60 @@ DEFAULT_OUTREACH = {
     "body": "Hi {first_name},\n\nI came across your work on {repo} and wanted to reach out about a role.\n\nBest regards,\n{sender}",
 }
 
+# Every placeholder a template may use. Anything else is rejected when a template is saved.
+PLACEHOLDERS: Dict[str, str] = {
+    "first_name": "Candidate's first name",
+    "full_name": "Candidate's full name",
+    "repo": "One of their repos that matches the role",
+    "location": "Their location",
+    "company_name": "Your company name",
+    "role_title": "Title of the role you are hiring for",
+    "sender": "The name of the person sending the email",
+}
+_PLACEHOLDER_RE = re.compile(r"\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def unknown_placeholders(*texts: str) -> List[str]:
+    """Placeholders used in the texts that are not supported, in order of first use."""
+    found: List[str] = []
+    for text in texts:
+        for name in _PLACEHOLDER_RE.findall(text or ""):
+            if name not in PLACEHOLDERS and name not in found:
+                found.append(name)
+    return found
+
 
 def best_email(row: Dict[str, Any]) -> Optional[str]:
     emails: List[str] = [e for e in [row.get("email"), *(row.get("portfolio_emails") or [])] if e]
     return emails[0] if emails else None
 
 
-def render_draft(row: Dict[str, Any], outreach: Dict[str, str], sender: str = "") -> Tuple[str, str]:
-    """Return (subject, body) with placeholders filled in."""
-    values = {
-        "first_name": (row.get("name") or row["login"]).split()[0],
+def candidate_values(row: Dict[str, Any], company_name: str = "", role_title: str = "", sender: str = "") -> Dict[str, str]:
+    name = (row.get("name") or row.get("login") or "").strip()
+    return {
+        "first_name": name.split()[0] if name else "",
+        "full_name": name,
         "repo": (row.get("matching_repos") or ["your projects"])[0],
+        "location": row.get("location") or "",
+        "company_name": company_name,
+        "role_title": role_title,
         "sender": sender,
-        "role_title": outreach.get("role_title", ""),
     }
 
-    def fill(text: str) -> str:
-        for key, value in values.items():
-            text = text.replace("{" + key + "}", value)
-        return text
 
-    return fill(outreach["subject"]), fill(outreach["body"]).strip()
+def fill(text: str, values: Dict[str, str]) -> str:
+    """Replace known placeholders in one pass, so a value containing braces is never re-expanded."""
+    return _PLACEHOLDER_RE.sub(lambda m: values.get(m.group(1), m.group(0)), text)
+
+
+def render(subject: str, body: str, values: Dict[str, str]) -> Tuple[str, str]:
+    return fill(subject, values).strip(), fill(body, values).strip()
+
+
+def render_draft(row: Dict[str, Any], outreach: Dict[str, str], sender: str = "", company_name: str = "") -> Tuple[str, str]:
+    """Return (subject, body) for one candidate from a {role_title, subject, body} dict."""
+    values = candidate_values(row, company_name, outreach.get("role_title", ""), sender)
+    return render(outreach["subject"], outreach["body"], values)
 
 
 def mail_links(to: str, subject: str, body: str) -> Dict[str, str]:

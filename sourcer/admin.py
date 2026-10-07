@@ -48,6 +48,34 @@ def _tenant_import(a):
     print(f"Copied {copied} candidates from {a.from_db!r} into tenant {a.slug!r} (source left untouched).")
 
 
+def _role_import(a):
+    from sourcer import roles_store
+
+    role = roles_store.import_role_file(tenant_db(a.tenant), a.file)
+    print(f"Imported role {role.name!r} into {a.tenant!r}.")
+
+
+def _candidates_revalidate(a):
+    """Remove not-yet-contacted candidates whose location the role now excludes."""
+    from sourcer import roles_store
+    from sourcer.enrich import location_ok
+
+    db = tenant_db(a.tenant)
+    role, _ = roles_store.get_role(db, a.role)
+    removed, kept_contacted = 0, []
+    for row in db["candidates"].find({"role": a.role}):
+        if location_ok(row.get("location"), role):
+            continue
+        if row.get("status", "new") == "new":
+            db["candidates"].delete_one({"_id": row["_id"]})
+            removed += 1
+        else:
+            kept_contacted.append(row["login"])
+    print(f"Removed {removed} candidates outside the role's locations.")
+    if kept_contacted:
+        print(f"Kept {len(kept_contacted)} that already have a status (review by hand): {', '.join(kept_contacted)}")
+
+
 def _user_create(a):
     user, password = registry.create_user(a.email, a.tenant, a.role, a.password)
     print(f"Created {user['role']} {user['email']} in {a.tenant!r}.")
@@ -82,6 +110,14 @@ def build_parser() -> argparse.ArgumentParser:
     p = tenant.add_parser("delete"); p.add_argument("slug"); p.add_argument("--confirm", default=""); p.set_defaults(func=_tenant_delete)
     p = tenant.add_parser("import-v0", help="copy candidates from the old single-company database")
     p.add_argument("slug"); p.add_argument("--from-db", default="talent_sourcer"); p.set_defaults(func=_tenant_import)
+
+    role = sub.add_parser("role").add_subparsers(dest="cmd", required=True)
+    p = role.add_parser("import", help="load a role YAML into a company"); p.add_argument("--tenant", required=True)
+    p.add_argument("--file", required=True); p.set_defaults(func=_role_import)
+
+    cand = sub.add_parser("candidates").add_subparsers(dest="cmd", required=True)
+    p = cand.add_parser("revalidate", help="drop candidates outside the role's locations")
+    p.add_argument("--tenant", required=True); p.add_argument("--role", required=True); p.set_defaults(func=_candidates_revalidate)
 
     user = sub.add_parser("user").add_subparsers(dest="cmd", required=True)
     p = user.add_parser("create"); p.add_argument("--tenant", required=True); p.add_argument("--email", required=True)

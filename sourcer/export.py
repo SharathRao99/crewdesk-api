@@ -1,6 +1,7 @@
 """CSV export for manual outreach."""
 
 import csv
+import io
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
 from sourcer.outreach import best_email, mail_links, render_draft
@@ -36,6 +37,7 @@ def prepare(
     outreach: Optional[Dict[str, str]],
     sender: str,
     keep: Callable[[Dict[str, Any]], bool],
+    company_name: str = "",
 ) -> List[Dict[str, Any]]:
     """Filter rows with `keep` and add the email address, draft and mail links."""
     out = []
@@ -44,10 +46,18 @@ def prepare(
             continue
         row = {**row, "email_to": best_email(row)}
         if outreach and row["email_to"]:
-            row["email_subject"], row["email_message"] = render_draft(row, outreach, sender)
+            row["email_subject"], row["email_message"] = render_draft(row, outreach, sender, company_name)
             row.update(mail_links(row["email_to"], row["email_subject"], row["email_message"]))
         out.append(flatten(row))
     return out
+
+
+def csv_bytes(prepared: List[Dict[str, Any]]) -> bytes:
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(prepared)
+    return buffer.getvalue().encode("utf-8-sig")  # BOM so Excel reads UTF-8 names correctly
 
 
 def write_csv(
@@ -56,31 +66,23 @@ def write_csv(
     outreach: Optional[Dict[str, str]] = None,
     sender: str = "",
     keep: Callable[[Dict[str, Any]], bool] = has_useful_link,
+    company_name: str = "",
 ) -> int:
     """Write rows that pass `keep` (default: has a LinkedIn/portfolio/resume link). Returns the number written.
 
     With `outreach`, rows that have an email get a ready-to-paste draft and mail links.
     """
-    prepared = prepare(rows, outreach, sender, keep)
-    with open(path, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=COLUMNS, extrasaction="ignore")
-        writer.writeheader()
-        writer.writerows(prepared)
+    prepared = prepare(rows, outreach, sender, keep, company_name)
+    with open(path, "wb") as f:
+        f.write(csv_bytes(prepared))
     return len(prepared)
 
 
-def write_xlsx(
-    path: str,
-    rows: Iterable[Dict[str, Any]],
-    outreach: Optional[Dict[str, str]] = None,
-    sender: str = "",
-    keep: Callable[[Dict[str, Any]], bool] = has_useful_link,
-) -> int:
-    """Same data as the CSV, but the mail links are real clickable cells."""
+def xlsx_bytes(prepared: List[Dict[str, Any]]) -> bytes:
+    """The same data as the CSV, but the mail links are real clickable cells."""
     from openpyxl import Workbook
     from openpyxl.styles import Font
 
-    prepared = prepare(rows, outreach, sender, keep)
     wb = Workbook()
     ws = wb.active
     ws.title = "Candidates"
@@ -104,5 +106,20 @@ def write_xlsx(
     widths = {"name": 24, "email_to": 30, "gmail_link": 16, "outlook_link": 18, "mailto_link": 18, "email_subject": 36, "email_message": 50}
     for c, column in enumerate(COLUMNS, start=1):
         ws.column_dimensions[ws.cell(row=1, column=c).column_letter].width = widths.get(column, 18)
-    wb.save(path)
+    out = io.BytesIO()
+    wb.save(out)
+    return out.getvalue()
+
+
+def write_xlsx(
+    path: str,
+    rows: Iterable[Dict[str, Any]],
+    outreach: Optional[Dict[str, str]] = None,
+    sender: str = "",
+    keep: Callable[[Dict[str, Any]], bool] = has_useful_link,
+    company_name: str = "",
+) -> int:
+    prepared = prepare(rows, outreach, sender, keep, company_name)
+    with open(path, "wb") as f:
+        f.write(xlsx_bytes(prepared))
     return len(prepared)

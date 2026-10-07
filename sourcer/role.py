@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -38,10 +38,14 @@ class Role:
 
 
 def load_role(path: str) -> Role:
-    data = yaml.safe_load(Path(path).read_text())
+    return role_from_dict(yaml.safe_load(Path(path).read_text()), source=path)
+
+
+def role_from_dict(data: Dict[str, Any], source: str = "role") -> Role:
+    """Build a Role from the parsed YAML/JSON profile (also how roles are stored in the database)."""
     for key in ("name", "languages", "locations"):
         if not data.get(key):
-            raise ValueError(f"Role file {path} is missing required field '{key}'")
+            raise ValueError(f"{source} is missing required field '{key}'")
 
     experience = data.get("experience") or {}
     signals = data.get("signals") or {}
