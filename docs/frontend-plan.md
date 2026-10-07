@@ -1,0 +1,111 @@
+# Frontend plan: `talent-sourcer-web`
+
+Companion to [v1-plan.md](v1-plan.md). Versions are not pinned here: install the current stable release of each package at Phase 0 and record them in `package.json`.
+
+## Stack at a glance
+
+| Concern | Choice | Notes |
+|---|---|---|
+| Framework | **Next.js** (App Router), React, TypeScript `strict` | Public candidate form and recruiter app in one project |
+| UI components | **shadcn/ui** on Tailwind CSS | Components are copied into `src/components/ui`, so we own them |
+| Server state | **TanStack Query** | All data from the API: cache, mutations, optimistic updates, job-progress polling |
+| Tables | **TanStack Table** + shadcn data-table pattern | Server-side sorting, filtering and pagination |
+| Forms | **TanStack Form** + **Zod** | Role builder, template editor, screening form |
+| Client UI state | **Zustand** | Only state that is not server data, not a form, and not in the URL |
+| URL state | **nuqs** | Filters, sort and page live in the URL so refresh, back and shared links work |
+| API types and client | **openapi-typescript** + **openapi-fetch** | Types generated from FastAPI's OpenAPI, so web and API cannot drift |
+| Auth | **Auth.js** (credentials provider, JWT session) | Email and password; calls the Python API to verify |
+| Icons, toasts, theme | lucide-react, sonner, next-themes | shadcn defaults |
+| Dates | date-fns | |
+| Env validation | @t3-oss/env-nextjs + Zod | App refuses to start with a missing secret |
+| Package manager | pnpm | |
+
+Tests: **Vitest** and React Testing Library (units and components), **MSW** (mock the API in tests), **Playwright** (end-to-end). Lint and format: ESLint (Next config), Prettier with the Tailwind plugin.
+
+## Choices worth a second look
+
+- **No TanStack Router.** Next.js already routes. Mixing two routers adds cost and no benefit. We use TanStack Query, Table and Form, which are router-independent.
+- **TanStack Form instead of React Hook Form.** RHF is shadcn's default and has more examples, so this is a real trade-off. TanStack Form keeps us in one family and has strong type inference; shadcn documents an integration. If it slows us down in Phase 1, switch: forms are isolated per feature.
+- **nuqs on top of Zustand.** Candidate filters belong in the URL, not in a store. Zustand handles the small remainder.
+- **Auth.js credentials.** Its credentials provider is deliberately minimal (JWT sessions only, no built-in password reset). That is fine for predefined users created by command, with the Python API doing the real password check. Revisit if we add self-service signup or SSO.
+- **No rich-text editor.** Templates are plain text with placeholder chips; web addresses become links automatically (proven in v0). Add Tiptap only if HTML emails become a requirement.
+- **No virtualisation or charts yet.** Add TanStack Virtual if a list passes a few thousand rows, and shadcn charts (Recharts) when a dashboard exists.
+
+## Where state lives (the rule)
+
+| Kind of state | Lives in | Example |
+|---|---|---|
+| Data from the API | TanStack Query | candidates, roles, templates, job progress |
+| Shareable view state | URL (nuqs) | score filter, status filter, search, sort, page |
+| Form values | TanStack Form | role builder, template editor |
+| Transient UI | Zustand | open detail panel, selected row ids, sidebar collapsed, sender-name draft |
+
+Never copy API data into a Zustand store. Mutations update the Query cache (optimistically for status and notes) and invalidate on settle.
+
+## How the browser reaches the API
+
+The browser never holds the API key.
+
+```
+browser -> Next.js catch-all route  /api/backend/[...path]  -> Python API
+            (checks the session, adds tenant + user headers and the service key)
+```
+
+- One generic proxy route handler instead of one handler per endpoint. It rejects requests with no session.
+- `openapi-fetch` is created once with `baseUrl: "/api/backend"`. Thin query hooks wrap it, with a **query-key factory** per feature (`candidateKeys.list(filters)`).
+- The public form uses a separate proxy path that accepts a signed token and no session, and only reaches the screening endpoints.
+
+## Structure
+
+```
+src/
+  app/
+    (auth)/login/
+    (app)/                      # recruiter shell: sidebar layout, session required
+      candidates/  candidates/[login]/
+      roles/  roles/[id]/
+      templates/
+      jobs/
+      settings/
+    s/[token]/                  # public screening form, own minimal layout
+    api/backend/[...path]/      # session-checking proxy
+  components/ui/                # shadcn, generated
+  features/
+    candidates/  roles/  templates/  jobs/  screening/
+      api/  (query hooks + key factory)   components/   schema.ts (Zod)   store.ts (Zustand, if needed)
+  lib/                          # api client, auth config, env, clipboard + mail-link helpers
+  stores/                       # app-wide Zustand (sidebar, theme)
+```
+
+Mail helpers are ported from v0: placeholder filling, `mailto`/Gmail/Outlook links with the trailing line break, and formatted (rich) clipboard copy.
+
+## shadcn components for v1
+
+button, input, textarea, label, select, checkbox, switch, badge, card, separator, tabs, table, tooltip, popover, command, dropdown-menu, dialog, **sheet** (candidate detail panel on desktop; focus trapping and Esc handling come with it), **drawer** (vaul; the same panel as a bottom sheet on phones), sidebar (off-canvas on mobile), skeleton, progress (job progress), scroll-area, alert, sonner, and the data-table pattern.
+
+## Responsive and mobile
+
+Mobile is a requirement for the recruiter app too, and the public form is designed **phone first** because candidates will mostly use a phone.
+
+- **Approach:** mobile-first Tailwind (base styles are the phone layout; `sm`, `md`, `lg` add space). Prefer CSS over JavaScript media queries.
+- **Navigation:** the shadcn sidebar becomes an off-canvas menu on small screens, opened from a top bar.
+- **Candidate list:** the data table is a table from tablet width up. On a phone each candidate is a **card** (name, score, location, status, one-tap links) driven by the same TanStack Table rows, so sorting and filtering stay identical. Filters collapse into a "Filters" sheet.
+- **Candidate detail:** a side sheet on desktop, a full-height bottom drawer on phones, with the same sections. Previous/next stay reachable with the thumb.
+- **Forms** (role builder, template editor): one column on phones, labels above inputs, a sticky bottom action bar, and the correct `inputmode` and `type` so the right keyboard appears.
+- **Touch:** controls at least 44px, no hover-only actions, no horizontal page scroll (tables scroll inside their own container only where unavoidable).
+- **Mail on phones:** the plain `mailto` link opens the phone's mail app and the app turns web addresses into links, so on mobile it is the primary button. The Gmail/Outlook formatted-paste flow stays as a secondary option, because pasting formatted text is unreliable in some mobile apps.
+- **Public form extras:** large inputs, numeric keyboard for salary fields, visible progress, and nothing that needs a desktop (no drag, no hover).
+- **Later, not v1:** an installable PWA.
+
+## Screens by phase
+
+- **Phase 1:** login, candidates list (data table), candidate detail sheet with the score breakdown, templates (list, editor with placeholder chips and a live preview against a real candidate), status and notes with history, export.
+- **Phase 2:** public screening form, budget badge on candidates.
+- **Phase 3:** roles list and builder, "Run sourcing" and job progress.
+
+## Quality gates
+
+- TypeScript strict, ESLint and Vitest run on every change; Playwright covers three flows from day one: login, tenant isolation (user A never sees tenant B), and template to draft link.
+- Playwright runs the main flows at three viewports: phone (375x812), tablet (768x1024) and desktop. A check fails on any horizontal page scroll or on a control smaller than 44px at phone width.
+- Accessibility basics: keyboard navigation, focus management, labelled controls. shadcn and Radix give most of it.
+- The public form is checked for no data leakage: it only ever returns the candidate's own first name and the role title.
