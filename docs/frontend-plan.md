@@ -114,5 +114,5 @@ Mobile is a requirement for the recruiter app too, and the public form is design
 
 - **shadcn now defaults to a Base UI based style (`base-nova`)** instead of Radix. The component list above is unchanged; wherever this plan says Radix, read Base UI. Components still live in `src/components/ui`.
 - Installed so far: Next.js 16, React 19, TanStack Query, openapi-fetch/openapi-typescript, Zod 4, @t3-oss/env-nextjs, next-themes, sonner, Vitest, MSW, Playwright. **TanStack Table, TanStack Form, Zustand, nuqs and Auth.js are installed in the phase that first uses them**, not before.
-- Playwright uses the installed Chrome (no browser download) and its own port, 3100, so it never attaches to another app on 3000.
+- Playwright uses the installed Chrome (no browser download) and its own port, 3110, so it never attaches to another app. Local ports: web dev 3100, Python API 8001, old v0 report UI 8010 (3000 and 8000 are often taken).
 - shadcn init wrote `--font-sans: var(--font-sans)` (self-referencing). It must point at the Geist variable: `var(--font-geist-sans)`. Fixed in `globals.css`.

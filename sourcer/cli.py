@@ -254,7 +254,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sv = sub.add_parser("serve", help="start the web UI")
     sv.add_argument("--host", default="127.0.0.1")
-    sv.add_argument("--port", type=int, default=8000)
+    sv.add_argument("--port", type=int, default=8010)
     sv.set_defaults(func=cmd_serve)
 
     return parser
