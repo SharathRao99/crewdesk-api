@@ -11,6 +11,9 @@ keywords: [laravel, livewire, eloquent, inertia, filament]
 # A candidate must match at least one to be kept.
 locations: [India, Bengaluru, Bangalore, Hyderabad, Pune, Chennai, Mumbai, Delhi, Noida, Gurgaon, Gurugram, Kolkata, Ahmedabad, Kochi, Jaipur]
 
+# Listed first (never required). People here appear above everyone else, best score first.
+preferred_locations: [Bengaluru, Bangalore]
+
 # City names repeat across countries; reject profiles that name any of these places.
 exclude_locations: [Pakistan, Bangladesh, Sri Lanka, Nepal, Kenya, Nigeria, USA, United States, UK, United Kingdom, Canada, Australia, Germany, Dubai, UAE, Singapore]
 

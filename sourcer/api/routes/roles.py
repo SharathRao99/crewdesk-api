@@ -14,7 +14,7 @@ def _out(ctx: Context, doc) -> RoleOut:
     role = role_from_dict(doc["data"])
     return RoleOut(
         name=role.name, languages=role.languages, keywords=role.keywords, locations=role.locations,
-        min_years=role.min_years, max_years=role.max_years, default_template_id=doc.get("default_template_id"), budget=BudgetOut(**doc["budget"]) if doc.get("budget") else None,
+        min_years=role.min_years, max_years=role.max_years, default_template_id=doc.get("default_template_id"), budget=BudgetOut(**doc["budget"]) if doc.get("budget") else None, preferred_locations=role.preferred_locations,
         candidates=ctx.db["candidates"].count_documents({"role": role.name}),
     )
 

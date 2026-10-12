@@ -22,6 +22,7 @@ def import_role(db: Database, data: Dict[str, Any]) -> Role:
          "$setOnInsert": {"default_template_id": None, "created_at": _now()}},
         upsert=True,
     )
+    apply_preferred(db, role.name)
     return role
 
 
@@ -63,7 +64,7 @@ def clear_budget(db: Database, name: str) -> bool:
 import re
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,48}[a-z0-9]$")  # used in URLs and in candidate ids, so it stays simple
-LIMITS = {"languages": (1, 5), "keywords": (0, 15), "locations": (1, 30), "exclude_locations": (0, 30), "manifest_contains": (0, 5)}
+LIMITS = {"languages": (1, 5), "keywords": (0, 15), "locations": (1, 30), "exclude_locations": (0, 30), "preferred_locations": (0, 10), "manifest_contains": (0, 5)}
 
 
 class RoleExists(Exception):
@@ -110,6 +111,7 @@ def definition_to_data(defn: Dict[str, Any], existing: Optional[Dict[str, Any]] 
         keywords=[k.lower() for k in _clean_list("keywords", defn["keywords"])],
         locations=_clean_list("locations", defn["locations"]),
         exclude_locations=_clean_list("exclude_locations", defn.get("exclude_locations") or []),
+        preferred_locations=_clean_list("preferred_locations", defn.get("preferred_locations") or []),
         experience={"min_years": low, "max_years": high},
         signals={"min_public_repos": defn["min_public_repos"], "active_within_months": defn["active_within_months"]},
     )
@@ -134,7 +136,7 @@ def data_to_definition(data: Dict[str, Any]) -> Dict[str, Any]:
     role = role_from_dict(data)
     return {
         "name": role.name, "languages": role.languages, "keywords": role.keywords, "locations": role.locations,
-        "exclude_locations": role.exclude_locations, "min_years": role.min_years, "max_years": role.max_years,
+        "exclude_locations": role.exclude_locations, "preferred_locations": role.preferred_locations, "min_years": role.min_years, "max_years": role.max_years,
         "min_public_repos": role.min_public_repos, "active_within_months": role.active_within_months,
         "min_language_share": role.min_language_share, "min_keyword_repos": role.min_keyword_repos,
         "manifest_file": role.manifest_file, "manifest_contains": role.manifest_contains,
@@ -157,4 +159,22 @@ def update_role(db: Database, name: str, defn: Dict[str, Any]) -> Optional[Dict[
         return None
     data = definition_to_data({**defn, "name": name}, existing=doc["data"])
     db["roles"].update_one({"_id": name}, {"$set": {"data": data, "updated_at": _now()}})
+    apply_preferred(db, name)  # people already found are re-flagged, so the list order follows the new setting
     return db["roles"].find_one({"_id": name})
+
+
+def apply_preferred(db: Database, name: str) -> int:
+    """Set `preferred` on every candidate of a role from the role's preferred places. Returns how many are preferred.
+
+    The list sorts on this stored flag, so changing the setting has to re-flag the people already found.
+    """
+    doc = db["roles"].find_one({"_id": name})
+    if not doc:
+        return 0
+    terms = [t for t in role_from_dict(doc["data"]).preferred_locations if t.strip()]
+    if terms:
+        expr = {"$regexMatch": {"input": {"$ifNull": ["$location", ""]}, "regex": "|".join(re.escape(t) for t in terms), "options": "i"}}
+    else:
+        expr = False
+    db["candidates"].update_many({"role": name}, [{"$set": {"preferred": expr}}])
+    return db["candidates"].count_documents({"role": name, "preferred": True})

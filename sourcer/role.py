@@ -22,6 +22,7 @@ class Role:
     keywords: List[str]
     locations: List[str]
     exclude_locations: List[str] = field(default_factory=list)
+    preferred_locations: List[str] = field(default_factory=list)  # listed first, never a requirement
     min_years: float = 0
     max_years: float = 100
     min_public_repos: int = 0
@@ -57,6 +58,7 @@ def role_from_dict(data: Dict[str, Any], source: str = "role") -> Role:
         keywords=[k.lower() for k in data.get("keywords") or []],
         locations=list(data["locations"]),
         exclude_locations=list(data.get("exclude_locations") or []),
+        preferred_locations=list(data.get("preferred_locations") or []),
         min_years=experience.get("min_years", 0),
         max_years=experience.get("max_years", 100),
         min_public_repos=signals.get("min_public_repos", 0),

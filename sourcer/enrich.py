@@ -54,6 +54,12 @@ def location_ok(location: Optional[str], role: Role) -> bool:
     return any(loc.lower() in lowered for loc in role.locations)
 
 
+def is_preferred(location: Optional[str], terms: List[str]) -> bool:
+    """True if the free-text location mentions one of the preferred places (case-insensitive, like location_ok)."""
+    lowered = (location or "").lower()
+    return any(t.lower() in lowered for t in terms if t.strip())
+
+
 def _repo_matches_keyword(repo: Dict[str, Any], keywords: List[str]) -> bool:
     haystack = " ".join(
         [repo.get("name") or "", repo.get("description") or "", " ".join(repo.get("topics") or [])]

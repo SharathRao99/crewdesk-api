@@ -10,7 +10,7 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
-PROJECTS = ("phone", "tablet", "desktop")  # one user per browser project, so parallel tests never share a password
+PROJECTS = ("phone", "tablet", "desktop", "narrow")  # one user per browser project, so parallel tests never share a password
 INITIAL_PASSWORD = "Initial-Pass-123"
 READY_PASSWORD = "A-brand-new-password-1"  # for the `ready-*` users, whose password change is already done
 def role_for(project: str) -> dict:
@@ -87,6 +87,31 @@ def seed_jobs(db, project: str) -> None:
         "note": "Waiting on GitHub (rate limit) for about 20 min. This is normal."}})
 
 
+def seed_ordering_and_paging(db, project: str) -> None:
+    """A role where a lower-scoring Bengaluru person must outrank a higher-scoring Hyderabad one, and a role with
+    250 people so the pagination bar shows "1-25 of 250" and "1 / 10" (the text that overflowed a 320px screen)."""
+    from sourcer import roles_store
+
+    def person(role: str, login: str, name: str, score: float, location: str) -> dict:
+        return {"_id": f"{role}:{login}", "role": role, "login": login, "name": name, "score": score, "status": "new", "notes": "",
+                "location": location, "est_years": 3.0, "language_share": 0.5, "keyword_repos": 3, "language_repos": 5,
+                "matching_repos": [f"{login}-shop"], "last_active": "2026-09-01", "url": f"https://github.com/{login}",
+                "email": f"{login}@example.com", "public_repos": 10, "followers": 1}
+
+    pref = f"php-dev-{project}-pref"
+    roles_store.import_role(db, {**role_for(project), "name": pref, "preferred_locations": ["Bengaluru", "Bangalore"]})
+    db["candidates"].insert_many([
+        person(pref, "far", "Far", 90, "Hyderabad, India"),
+        person(pref, "home", "Home", 60, "Bengaluru, India"),
+        person(pref, "nearby", "Nearby", 40, "Bangalore"),
+    ])
+    roles_store.apply_preferred(db, pref)  # flags people saved after the role was imported
+
+    many = f"php-dev-{project}-many"
+    roles_store.import_role(db, {**role_for(project), "name": many})
+    db["candidates"].insert_many([person(many, f"m{i:03d}", f"Person {i:03d}", round(95 - i * 0.2, 1), "Bengaluru, India") for i in range(250)])
+
+
 def main() -> None:
     if not os.getenv("PLATFORM_DB", "").startswith("e2e_") or not os.getenv("TENANT_DB_PREFIX", "").startswith("e2e_"):
         sys.exit("Refusing to seed: PLATFORM_DB and TENANT_DB_PREFIX must start with 'e2e_'")
@@ -121,6 +146,7 @@ def main() -> None:
             registry.set_github_token(slug, "ghp_fake_token_for_tests_only")  # so runs can be queued; company B has none
             for project in PROJECTS:
                 seed_jobs(db, project)
+                seed_ordering_and_paging(db, project)
         for project in PROJECTS:
             # hr-*: a fresh account that must change its password (only the password-change test uses it)
             registry.create_user(f"hr-{project}@{slug}.test", slug, "admin", INITIAL_PASSWORD)

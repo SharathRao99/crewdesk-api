@@ -78,7 +78,7 @@ def list_item(row: Dict[str, Any], budget: Optional[Dict[str, Any]] = None) -> C
         phone=(row.get("portfolio_phones") or [None])[0], linkedin_url=row.get("linkedin_url"),
         portfolio_url=row.get("portfolio_url") or row.get("blog") or None,
         resume_url=(row.get("resume_links") or [None])[0], github_url=row.get("url") or f"https://github.com/{row['login']}",
-        repos=(row.get("matching_repos") or [])[:5], hireable=bool(row.get("hireable")),
+        repos=(row.get("matching_repos") or [])[:5], hireable=bool(row.get("hireable")), preferred=bool(row.get("preferred")),
     )
 
 

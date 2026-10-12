@@ -33,7 +33,7 @@ def export(
     if status and status not in STATUSES:
         raise HTTPException(422, f"status must be one of {', '.join(STATUSES)}")
     query = queries.build_query(role, status, min_score, q, location)
-    rows = list(ctx.db["candidates"].find(query).sort("score", -1).limit(MAX_ROWS))
+    rows = list(ctx.db["candidates"].find(query).sort([("preferred", -1), ("score", -1)]).limit(MAX_ROWS))
     try:  # drop people outside the role's target places, as the standalone report does
         role_obj, _ = roles_store.get_role(ctx.db, role)
         rows = [r for r in rows if location_ok(r.get("location"), role_obj)]

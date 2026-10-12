@@ -61,6 +61,7 @@ class CandidateListItem(BaseModel):
     github_url: str
     repos: List[str] = []
     hireable: bool = False
+    preferred: bool = False  # in one of the role's preferred places, so listed first
     screening: Optional[ScreeningSummary] = None
     budget_verdict: Optional[str] = None  # within | stretch | over, from the role's current budget
 
@@ -137,6 +138,7 @@ class RoleOut(BaseModel):
     default_template_id: Optional[str] = None
     candidates: int = 0
     budget: Optional[BudgetOut] = None
+    preferred_locations: List[str] = []
 
 
 class DefaultTemplateBody(BaseModel):
@@ -242,6 +244,7 @@ class RoleDefinition(BaseModel):
     keywords: List[str] = []
     locations: List[str]
     exclude_locations: List[str] = []
+    preferred_locations: List[str] = []
     min_years: float = 0
     max_years: float = 50
     min_public_repos: int = 0

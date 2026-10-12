@@ -19,7 +19,7 @@ from pymongo.database import Database
 
 from sourcer import jobs, roles_store
 from sourcer.discover import discover
-from sourcer.enrich import enrich
+from sourcer.enrich import enrich, is_preferred
 from sourcer.github import GitHubClient, Interrupted
 from sourcer.portfolio import crawl_portfolio, find_phones
 from sourcer.role import Role
@@ -43,7 +43,8 @@ def evaluate(client: GitHubClient, role: Role, login: str) -> Tuple[str, Optiona
     if not meets_primary_skill(candidate, role):
         return "not_primary", None
     breakdown = score(candidate, role)
-    return "kept", {**asdict(candidate), "score": breakdown["total"], "score_breakdown": breakdown}
+    return "kept", {**asdict(candidate), "score": breakdown["total"], "score_breakdown": breakdown,
+                    "preferred": is_preferred(candidate.location, role.preferred_locations)}
 
 
 class _Control:

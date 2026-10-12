@@ -53,7 +53,9 @@ def list_candidates(
                                 answered, budget, budgets.get(role) if role else None)
     col = ctx.db["candidates"]
     direction = 1 if order == "asc" else -1
-    rows = col.find(query).sort([(queries.SORTS[sort], direction), ("_id", 1)]).skip(skip).limit(limit)
+    # The default view (best score first) lists people in the role's preferred places first; any other sort is exactly what was asked for.
+    order_by = [("preferred", -1), ("score", -1)] if sort == "score" and order == "desc" else [(queries.SORTS[sort], direction)]
+    rows = col.find(query).sort(order_by + [("_id", 1)]).skip(skip).limit(limit)
     return CandidateList(total=col.count_documents(query), items=[queries.list_item(r, budgets.get(r["role"])) for r in rows])
 
 
