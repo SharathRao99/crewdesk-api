@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, Request
 
-from sourcer import modules, ratelimit
+from sourcer import avatars, modules, ratelimit
 from sourcer.api.deps import Context, get_context, require_service_key
-from sourcer.api.models import LoginBody, PasswordBody, SessionOut, UserOut
+from sourcer.api.models import AvatarIn, AvatarOut, LoginBody, PasswordBody, SessionOut, UserOut
 from sourcer.tenancy import registry
 
 router = APIRouter(tags=["auth"])
@@ -20,6 +20,7 @@ def _user_out(user: dict, tenant: str, tenant_name: str) -> UserOut:
         id=str(user["_id"]), email=user["email"], tenant=tenant, tenant_name=tenant_name, role=user["role"],
         must_change_password=user.get("must_change_password", False),
         modules=modules.modules_for(user), session_version=int(user.get("session_version", 0)),
+        avatar=AvatarOut(**avatars.of(user)),
     )
 
 
@@ -54,3 +55,14 @@ def change_password(body: PasswordBody, ctx: Context = Depends(get_context)) -> 
     registry.log_event("password_changed", ctx.user["email"], ctx.tenant)
     # Older sessions end (the version moved on); the caller keeps theirs by taking the new version.
     return SessionOut(session_version=registry.session_version_of(ctx.user["_id"]) or 0)
+
+
+@router.put("/me/avatar", response_model=AvatarOut)
+def set_avatar(body: AvatarIn, ctx: Context = Depends(get_context)) -> AvatarOut:
+    try:
+        choice = avatars.validate(body.style, body.seed)
+    except ValueError as e:
+        raise HTTPException(422, str(e)) from None
+    registry.set_avatar(ctx.user["_id"], choice)
+    registry.log_event("avatar_changed", ctx.user["email"], ctx.tenant)
+    return AvatarOut(**choice)

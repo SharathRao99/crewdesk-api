@@ -11,6 +11,17 @@ class LoginBody(BaseModel):
     password: str = Field(max_length=256)
 
 
+class AvatarOut(BaseModel):
+    style: str
+    seed: str
+
+
+class AvatarIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    style: str = Field(max_length=20)
+    seed: str = Field(max_length=24)
+
+
 class UserOut(BaseModel):
     id: str
     email: str
@@ -20,6 +31,7 @@ class UserOut(BaseModel):
     must_change_password: bool
     modules: List[str] = []
     session_version: int = 0
+    avatar: AvatarOut = AvatarOut(style="thumbs", seed="")
 
 
 class PasswordBody(BaseModel):

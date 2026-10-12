@@ -157,3 +157,30 @@ def test_indexes_ensure_is_repeatable(two_tenants):
     admin.main(["indexes", "ensure", "--all"])
     names = {i["name"] for i in tenant_db("acme")["audit_log"].list_indexes()}
     assert any(n.startswith("at_") for n in names)
+
+
+def test_avatar_default_choose_and_validate(api, two_tenants):
+    from sourcer.tenancy import registry
+
+    user = registry.get_user_by_id(two_tenants["acme"]["user_id"])
+    h = headers("acme", user)
+    first = api.get("/me", headers=h).json()["avatar"]
+    assert first["style"] == "thumbs" and len(first["seed"]) == 12  # everyone has one from the start, and it is stable
+    assert api.get("/me", headers=h).json()["avatar"] == first
+
+    ok = api.put("/me/avatar", json={"style": "lorelei", "seed": "abc123XYZ"}, headers=h)
+    assert ok.status_code == 200 and ok.json() == {"style": "lorelei", "seed": "abc123XYZ"}
+    assert api.get("/me", headers=h).json()["avatar"] == {"style": "lorelei", "seed": "abc123XYZ"}
+
+    for bad in ({"style": "nope", "seed": "a"}, {"style": "thumbs", "seed": ""}, {"style": "thumbs", "seed": "a b"},
+                {"style": "thumbs", "seed": "<script>"}, {"style": "thumbs", "seed": "x" * 25}, {"style": "thumbs", "seed": "a", "x": 1}):
+        assert api.put("/me/avatar", json=bad, headers=h).status_code == 422, bad
+    assert api.get("/me", headers=h).json()["avatar"]["seed"] == "abc123XYZ"  # refused choices changed nothing
+
+    other = registry.get_user_by_id(two_tenants["globex"]["user_id"])
+    assert api.get("/me", headers=headers("globex", other)).json()["avatar"]["seed"] != "abc123XYZ"  # not shared across people
+
+
+def test_avatar_can_be_set_by_an_employee_without_hiring_access(api, acme):
+    h = headers("acme", acme["employee"])
+    assert api.put("/me/avatar", json={"style": "shapes", "seed": "k9"}, headers=h).status_code == 200

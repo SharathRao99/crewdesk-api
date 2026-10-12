@@ -231,3 +231,7 @@ def log_event(kind: str, email: str = "", tenant: str = "", ip: str = "") -> Non
     platform_db()["auth_events"].insert_one(
         {"kind": kind, "email": (email or "")[:254], "tenant": tenant, "ip": (ip or "")[:64], "at": _now()}
     )
+
+
+def set_avatar(user_id: Any, choice: Dict[str, str]) -> None:
+    platform_db()["users"].update_one({"_id": user_id}, {"$set": {"avatar": choice}})
