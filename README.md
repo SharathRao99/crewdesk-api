@@ -1,6 +1,29 @@
-# talent-sourcer
+# crewdesk-api
 
-Role-driven developer sourcing from **public GitHub data**, with rule-based scoring and manual-outreach tracking in MongoDB. A new role is a new YAML file; no code changes.
+The API and worker behind **Crewdesk**, a multi-company work platform. Any company can run its own copy: nothing here is tied to one company. Modules:
+
+- **Hiring**: role-driven developer sourcing from **public GitHub data**, with rule-based scoring and manual-outreach tracking in MongoDB. A new role is a new YAML file; no code changes.
+- **People** (in progress): employees, leave policy and leave records.
+
+The web app is the sibling repo `crewdesk-web`.
+
+## Quick start (new company)
+
+```bash
+git clone <this repo> crewdesk-api && cd crewdesk-api
+python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"
+cp .env.example .env                      # then fill in the values below
+.venv/bin/sourcer-admin generate-key      # paste the output as SECRETS_KEY in .env
+# Also set API_SERVICE_KEY (a long random string) and make sure MongoDB is running (MONGODB_URI).
+
+.venv/bin/sourcer-admin setup --company "Your Company" --email you@yourcompany.com
+# prints a one-time password; you must change it at first login
+
+.venv/bin/sourcer api                     # API on :8001
+.venv/bin/sourcer worker                  # runs sourcing jobs (Hiring)
+```
+
+Then start `crewdesk-web` (see its README) and sign in at http://localhost:3100. For Hiring, add your GitHub token: `sourcer-admin tenant set-github-token <company-id>`.
 
 ## Setup
 
@@ -30,12 +53,12 @@ sourcer-admin tenant import-v0 acme              # copy candidates from the old 
 ## Usage
 
 ```bash
-sourcer run roles/laravel-dev-india-3y.yaml --dry-run --max-candidates 20   # try it, no DB
-sourcer run roles/laravel-dev-india-3y.yaml --csv out/laravel.csv           # full run, saves to MongoDB
-sourcer list laravel-dev-india-3y --min-score 60
-sourcer status laravel-dev-india-3y some-login contacted --note "emailed 5 Oct"
-sourcer export roles/laravel-dev-india-3y.yaml out/shortlist.csv --sender "Your Name" --min-score 60   # CSV with ready-to-paste email drafts
-sourcer report roles/laravel-dev-india-3y.yaml out/hr-report.html                                        # standalone HTML for HR
+sourcer run roles/example-backend-dev.yaml --dry-run --max-candidates 20   # try it, no DB
+sourcer run roles/example-backend-dev.yaml --csv out/example.csv           # full run, saves to MongoDB
+sourcer list example-backend-dev --min-score 60
+sourcer status example-backend-dev some-login contacted --note "emailed 5 Oct"
+sourcer export roles/example-backend-dev.yaml out/shortlist.csv --sender "Your Name" --min-score 60   # CSV with ready-to-paste email drafts
+sourcer report roles/example-backend-dev.yaml out/hr-report.html                                        # standalone HTML for HR
 ```
 
 Re-running a role refreshes candidate data but keeps their `status` and `notes`.

@@ -31,6 +31,14 @@ def mongo(monkeypatch):
     reset_client()
 
 
+def settled(user):
+    """Clear the one-time-password flag, as a user who already chose their own password."""
+    from sourcer.tenancy.db import platform_db
+
+    platform_db()["users"].update_one({"_id": user["_id"]}, {"$set": {"must_change_password": False}})
+    return user
+
+
 @pytest.fixture
 def api(mongo):
     from sourcer.api.app import app
@@ -48,6 +56,7 @@ def two_tenants(mongo):
     for slug in ("acme", "globex"):
         registry.create_tenant(slug, slug.title() + " Inc")
         user, password = registry.create_user(f"hr@{slug}.com", slug, "admin")
+        settled(user)
         tenant_db(slug)["candidates"].insert_one(
             {"_id": f"r:{slug}-dev", "login": f"{slug}-dev", "role": "r", "score": 80, "status": "new"}
         )

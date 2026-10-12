@@ -23,3 +23,11 @@ def allow(key: str, limit: int, window_seconds: int) -> bool:
         return_document=True,
     )
     return doc["n"] <= limit
+
+
+def over(key: str, limit: int, window_seconds: int) -> bool:
+    """True once `key` has used up its `limit` hits in the current window. Counts nothing itself (see `allow`)."""
+    bucket = int(datetime.now(timezone.utc).timestamp()) // window_seconds
+    digest = hashlib.sha256(key.encode()).hexdigest()[:32]
+    doc = platform_db()["rate_limits"].find_one({"_id": f"{digest}:{bucket}"})
+    return bool(doc) and doc["n"] >= limit

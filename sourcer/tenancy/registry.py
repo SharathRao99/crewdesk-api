@@ -1,5 +1,6 @@
 """Tenants and users (the `platform` database)."""
 
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,9 +13,11 @@ from pymongo.errors import DuplicateKeyError
 from sourcer.tenancy import crypto
 from sourcer.tenancy.db import TenantError, client, platform_db, tenant_db_name, validate_slug
 
-ROLES = ("admin", "recruiter")
+ROLES = ("admin", "recruiter", "employee")
 MAX_FAILED_LOGINS = 5
 LOCKOUT = timedelta(minutes=15)
+AUTH_EVENT_DAYS = 90
+AUDIT_DAYS = 365
 
 _hasher = PasswordHasher()
 # Verified against when the email is unknown, so a missing user takes as long as a wrong password.
@@ -25,10 +28,13 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
 def _norm_email(email: str) -> str:
     email = (email or "").strip().lower()
-    if "@" not in email or email.startswith("@") or email.endswith("@"):
-        raise ValueError(f"Invalid email {email!r}")
+    if len(email) > 254 or not _EMAIL_RE.match(email):
+        raise ValueError(f"Invalid email {email[:60]!r}")
     return email
 
 
@@ -37,12 +43,15 @@ def ensure_platform_indexes() -> None:
     db["tenants"].create_index("slug", unique=True)
     db["users"].create_index("email", unique=True)
     db["users"].create_index("tenant")
+    db["auth_events"].create_index("at", expireAfterSeconds=AUTH_EVENT_DAYS * 86400)  # sign-in history ages out
 
 
 def ensure_tenant_indexes(slug: str) -> None:
     db = client()[tenant_db_name(slug)]
     db["candidates"].create_index([("role", ASCENDING), ("score", DESCENDING)])
     db["candidates"].create_index("status")
+    db["audit_log"].create_index("at", expireAfterSeconds=AUDIT_DAYS * 86400)
+    db["audit_log"].create_index([("action", ASCENDING), ("at", DESCENDING)])
 
 
 # ---------- tenants ----------
@@ -107,6 +116,7 @@ def create_user(email: str, tenant: str, role: str = "recruiter", password: Opti
         "role": role,
         "password_hash": _hasher.hash(password),
         "must_change_password": True,
+        "session_version": 0,  # bumped when a session must end everywhere (password reset, disable)
         "disabled": False,
         "failed_logins": 0,
         "locked_until": None,
@@ -139,7 +149,8 @@ def reset_password(email: str) -> str:
     password = new_password()
     result = platform_db()["users"].update_one(
         {"email": _norm_email(email)},
-        {"$set": {"password_hash": _hasher.hash(password), "must_change_password": True, "failed_logins": 0, "locked_until": None}},
+        {"$set": {"password_hash": _hasher.hash(password), "must_change_password": True, "failed_logins": 0, "locked_until": None},
+         "$inc": {"session_version": 1}},
     )
     if not result.matched_count:
         raise ValueError(f"No user {email!r}")
@@ -147,7 +158,9 @@ def reset_password(email: str) -> str:
 
 
 def set_disabled(email: str, disabled: bool) -> None:
-    result = platform_db()["users"].update_one({"email": _norm_email(email)}, {"$set": {"disabled": disabled}})
+    result = platform_db()["users"].update_one(
+        {"email": _norm_email(email)}, {"$set": {"disabled": disabled}, "$inc": {"session_version": 1}}
+    )
     if not result.matched_count:
         raise ValueError(f"No user {email!r}")
 
@@ -202,6 +215,19 @@ def change_password(email: str, old: str, new: str) -> bool:
     if not verify_login(email, old):
         return False
     platform_db()["users"].update_one(
-        {"email": _norm_email(email)}, {"$set": {"password_hash": _hasher.hash(new), "must_change_password": False}}
+        {"email": _norm_email(email)},
+        {"$set": {"password_hash": _hasher.hash(new), "must_change_password": False}, "$inc": {"session_version": 1}},
     )
     return True
+
+
+def session_version_of(user_id: Any) -> Optional[int]:
+    user = get_user_by_id(user_id)
+    return None if not user else int(user.get("session_version", 0))
+
+
+def log_event(kind: str, email: str = "", tenant: str = "", ip: str = "") -> None:
+    """Sign-in history (successes, failures, lockouts). Never stores a password or a token."""
+    platform_db()["auth_events"].insert_one(
+        {"kind": kind, "email": (email or "")[:254], "tenant": tenant, "ip": (ip or "")[:64], "at": _now()}
+    )

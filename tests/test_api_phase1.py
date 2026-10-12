@@ -271,12 +271,16 @@ def test_export_filters_and_validation(api, seeded):
 # ---------- account ----------
 
 def test_me_and_password_change(api, seeded):
+    from sourcer.tenancy.db import platform_db
+
+    # The fixtures hand out settled users; this test is about the first-login case, so put the flag back.
+    platform_db()["users"].update_one({"email": "hr@acme.com"}, {"$set": {"must_change_password": True}})
     h = H(seeded)
     me = api.get("/me", headers=h).json()
     assert me["email"] == "hr@acme.com" and me["tenant_name"] == "Acme Inc" and me["must_change_password"] is True
     assert api.post("/me/password", json={"old": "wrong", "new": "a-long-enough-password"}, headers=h).status_code == 400
     assert api.post("/me/password", json={"old": seeded["acme"]["password"], "new": "short"}, headers=h).status_code == 422
-    assert api.post("/me/password", json={"old": seeded["acme"]["password"], "new": "a-long-enough-password"}, headers=h).status_code == 204
+    assert api.post("/me/password", json={"old": seeded["acme"]["password"], "new": "a-long-enough-password"}, headers=h).status_code == 200
     assert api.get("/me", headers=h).json()["must_change_password"] is False
     login = api.post("/auth/login", json={"email": "hr@acme.com", "password": "a-long-enough-password"}, headers={"X-Service-Key": KEY})
     assert login.status_code == 200

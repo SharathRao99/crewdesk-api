@@ -337,7 +337,8 @@ def test_deleting_a_candidate_removes_everything_and_needs_an_admin(api, seeded)
     api.post(f"/public/screening/{url_token(link)}", json=GOOD, headers=PUB)
     api.patch(f"/candidates/{ROLE}/ann", json={"notes": "n"}, headers=h)
 
-    recruiter, _ = registry.create_user("rec@acme.com", "acme", "recruiter")
+    recruiter, first = registry.create_user("rec@acme.com", "acme", "recruiter")
+    registry.change_password("rec@acme.com", first, "a-long-enough-password")  # past the one-time password
     rh = {**h, "X-User-Id": str(recruiter["_id"])}
     refused = api.delete(f"/candidates/{ROLE}/ann", headers=rh)
     assert refused.status_code == 403 and "x-session" not in refused.headers  # "not allowed" must not end their session

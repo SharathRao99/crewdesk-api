@@ -2,12 +2,13 @@
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class LoginBody(BaseModel):
-    email: str
-    password: str
+    model_config = ConfigDict(extra="forbid")
+    email: str = Field(max_length=254)
+    password: str = Field(max_length=256)
 
 
 class UserOut(BaseModel):
@@ -17,11 +18,18 @@ class UserOut(BaseModel):
     tenant_name: str
     role: str
     must_change_password: bool
+    modules: List[str] = []
+    session_version: int = 0
 
 
 class PasswordBody(BaseModel):
-    old: str
-    new: str
+    model_config = ConfigDict(extra="forbid")
+    old: str = Field(max_length=256)
+    new: str = Field(max_length=256)
+
+
+class SessionOut(BaseModel):
+    session_version: int
 
 
 class ScreeningSummary(BaseModel):

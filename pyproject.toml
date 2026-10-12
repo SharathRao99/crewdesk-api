@@ -1,5 +1,5 @@
 [project]
-name = "talent-sourcer"
+name = "crewdesk-api"
 version = "0.1.0"
 description = "Role-driven developer sourcing from public GitHub data, with manual outreach tracking."
 readme = "README.md"

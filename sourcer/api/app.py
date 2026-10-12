@@ -7,8 +7,9 @@ the tenant and user from the logged-in session. Tenant data is only reachable th
 
 from typing import Dict
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
+from sourcer.api.deps import require_module
 from sourcer.api.routes import auth, candidates, export, jobs, public, roles, templates
 
 app = FastAPI(title="Talent Sourcer API", version="0.2.0")
@@ -19,5 +20,10 @@ def health() -> Dict[str, str]:
     return {"status": "ok"}
 
 
-for module in (auth, candidates, roles, jobs, templates, export, public):
+# Open to every signed-in user (or to nobody signed in): sign-in, who-am-I, the public candidate form.
+for module in (auth, public):
     app.include_router(module.router)
+
+# Hiring: a router added here cannot forget the module check.
+for module in (candidates, roles, jobs, templates, export):
+    app.include_router(module.router, dependencies=[Depends(require_module("hiring"))])

@@ -1,0 +1,52 @@
+# An example role. Copy this file, change it, and import it (or build one in the app under Roles).
+# One file per role; no code changes needed.
+name: example-backend-dev
+
+# Languages GitHub reports for the candidate's repos (exact GitHub names).
+languages: [Python]
+
+# Matched (case-insensitive) against repo name, description and topics.
+keywords: [fastapi, django, flask, sqlalchemy]
+
+# Matched (case-insensitive substring) against the free-text profile location.
+# A candidate must match at least one to be kept. Leave empty to accept any location.
+locations: [India, Bengaluru, Pune, Hyderabad]
+
+# Listed first (never required). People here appear above everyone else, best score first.
+preferred_locations: [Bengaluru]
+
+# City names repeat across countries; reject profiles that name any of these places.
+exclude_locations: []
+
+# Rough estimate from the date of the first relevant public repo. GitHub has no
+# "years of experience" field, so treat this as a hint only.
+experience: {min_years: 2, max_years: 6}
+
+signals:
+  min_public_repos: 3
+  active_within_months: 12
+
+# Primary-skill gate: drop people for whom the language/framework isn't a main skill.
+primary_skill:
+  min_language_share: 0.3     # Python must be >= 30% of their own non-fork repos
+  min_keyword_repos: 1        # at least one repo showing one of the keywords
+  manifest:                   # fallback evidence when names/descriptions don't say it
+    file: requirements.txt
+    contains: [fastapi]
+
+# Email template. Placeholders: {first_name}, {repo}, {sender}, {role_title}.
+outreach:
+  role_title: Backend Developer
+  subject: "Backend Developer opportunity at <Your Company>"
+  body: |
+    Hi {first_name},
+
+    I came across your work on {repo} and thought you might be a good fit for a role we are hiring for.
+
+    We are looking for a Backend Developer. If you are open to a conversation, please reply with your updated resume.
+
+    Thanks,
+    {sender}
+
+# Optional tuning of the rule-based score (all default to the values shown).
+# weights: {keywords: 40, language: 10, experience: 25, activity: 15, contact: 10}

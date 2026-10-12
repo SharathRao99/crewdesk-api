@@ -3,12 +3,39 @@
 import argparse
 import getpass
 import os
+import re
 import sys
 
 from dotenv import load_dotenv
 
 from sourcer.tenancy import crypto, registry
 from sourcer.tenancy.db import TenantError, client, tenant_db
+
+
+def slugify(name: str) -> str:
+    """'Acme Pvt. Ltd' -> 'acme-pvt-ltd' (2-30 characters, the shape tenant slugs need)."""
+    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:30].strip("-")
+    return slug
+
+
+def _setup(a):
+    """First run for a new company: the company plus its first administrator, in one step."""
+    slug = a.slug or slugify(a.company)
+    registry.create_tenant(slug, a.company)
+    user, password = registry.create_user(a.email, slug, "admin")
+    print(f"Created company {a.company!r} (id {slug!r}) and administrator {user['email']}.")
+    print(f"One-time password (shown once, must be changed at first login): {password}")
+    print("Next: start the API and the web app (see the README), sign in, and change the password.")
+    print(f"To find developers: sourcer-admin tenant set-github-token {slug}")
+
+
+def _indexes_ensure(a):
+    """Create any indexes a newer version needs, for the platform and for each company."""
+    registry.ensure_platform_indexes()
+    slugs = [t["slug"] for t in registry.list_tenants()] if a.all else [a.tenant]
+    for slug in slugs:
+        registry.ensure_tenant_indexes(slug)
+    print(f"Indexes are in place for the platform and {len(slugs)} company database(s).")
 
 
 def _tenant_create(a):
@@ -112,6 +139,14 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="group", required=True)
 
     sub.add_parser("generate-key", help="print a new SECRETS_KEY").set_defaults(func=lambda a: print(crypto.generate_key()))
+
+    p = sub.add_parser("setup", help="first run: create a company and its first administrator")
+    p.add_argument("--company", required=True, help="company name, e.g. 'Acme Inc'"); p.add_argument("--email", required=True)
+    p.add_argument("--slug", help="short id for the company; made from the name if omitted"); p.set_defaults(func=_setup)
+
+    idx = sub.add_parser("indexes").add_subparsers(dest="cmd", required=True)
+    p = idx.add_parser("ensure", help="create missing database indexes after an upgrade")
+    p.add_argument("--tenant"); p.add_argument("--all", action="store_true"); p.set_defaults(func=_indexes_ensure)
 
     tenant = sub.add_parser("tenant").add_subparsers(dest="cmd", required=True)
     p = tenant.add_parser("create"); p.add_argument("slug"); p.add_argument("--name", required=True); p.set_defaults(func=_tenant_create)
