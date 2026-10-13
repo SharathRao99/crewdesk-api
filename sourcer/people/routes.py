@@ -4,7 +4,7 @@ from typing import Any, Callable, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from sourcer.api.deps import Context, audit, require_admin
-from sourcer.people import store
+from sourcer.people import lifecycle, policy as company_policy, store
 from sourcer.people.models import EmployeeIn, EmployeeList, EmployeeOption, EmployeeOut, EmployeePatch
 
 # Everything here needs the `people` module (set in app.py) and, for now, an administrator: employees get their own
@@ -19,19 +19,20 @@ def _iso(value: Any) -> str:
     return value.replace(tzinfo=timezone.utc).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if value.tzinfo is None else value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _out(doc: Dict[str, Any], names: Dict[str, str]) -> EmployeeOut:
+def _out(doc: Dict[str, Any], names: Dict[str, str], policy: Dict[str, Any]) -> EmployeeOut:
     manager = str(doc["manager_id"]) if doc.get("manager_id") else None
     return EmployeeOut(
         id=str(doc["_id"]), employee_no=doc["employee_no"], name=doc["name"], work_email=doc["work_email"],
         phone=doc.get("phone"), designation=doc.get("designation"), department=doc.get("department"),
         joining_date=doc["joining_date"], manager_id=manager, manager_name=names.get(manager) if manager else None,
         status=doc.get("status", "active"), has_login=bool(doc.get("user_id")),
+        probation=lifecycle.probation_info(doc, policy), notice=lifecycle.notice_info(doc),
         created_at=_iso(doc.get("created_at")), updated_at=_iso(doc.get("updated_at")),
     )
 
 
 def _one(ctx: Context, doc: Dict[str, Any]) -> EmployeeOut:
-    return _out(doc, store.names_of(ctx.db, [doc.get("manager_id")]))
+    return _out(doc, store.names_of(ctx.db, [doc.get("manager_id")]), company_policy.get_policy(ctx.db))
 
 
 def _guard(call: Callable[[], Any]) -> Any:
@@ -56,7 +57,8 @@ def list_employees(
 ) -> EmployeeList:
     docs, total = _guard(lambda: store.list_employees(ctx.db, q, status, sort, order, page, page_size))
     names = store.names_of(ctx.db, [d.get("manager_id") for d in docs])
-    return EmployeeList(items=[_out(d, names) for d in docs], total=total, page=page, page_size=page_size)
+    policy = company_policy.get_policy(ctx.db)
+    return EmployeeList(items=[_out(d, names, policy) for d in docs], total=total, page=page, page_size=page_size)
 
 
 @router.get("/employees/options", response_model=List[EmployeeOption])

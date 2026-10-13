@@ -14,6 +14,9 @@ from pymongo import ASCENDING, ReturnDocument
 from pymongo.database import Database
 from pymongo.errors import DuplicateKeyError
 
+from sourcer.people import policy as company_policy
+from sourcer.people.dates import add_months
+from sourcer.people.errors import NotFound, PeopleError
 from sourcer.tenancy.registry import normalize_email
 
 STATUSES = ("active", "inactive")
@@ -24,12 +27,7 @@ DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 MAX_PAGE_SIZE = 100
 
 
-class EmployeeError(ValueError):
-    """A problem with what was submitted (shown to HR as is)."""
-
-
-class NotFound(LookupError):
-    pass
+EmployeeError = PeopleError  # the name the rest of this file (and its callers) already use
 
 
 def _now() -> datetime:
@@ -42,6 +40,10 @@ def ensure_indexes(db: Database) -> None:
     col.create_index("employee_no", unique=True)
     col.create_index([("status", ASCENDING), ("name_lc", ASCENDING)])
     col.create_index("manager_id")
+    from sourcer.people import leave  # here, not at the top: leave imports this module
+
+    company_policy.ensure_indexes(db)
+    leave.ensure_indexes(db)
 
 
 def oid(value: Any) -> ObjectId:
@@ -158,11 +160,14 @@ def create(db: Database, data: Dict[str, Any], by: str) -> Dict[str, Any]:
     ensure_indexes(db)
     fields = clean(data)
     fields["manager_id"] = _check_manager(db, None, data.get("manager_id"))
+    from sourcer.people import lifecycle  # here, not at the top: lifecycle imports this module
+
+    probation = lifecycle.initial_fields(company_policy.get_policy(db), date.fromisoformat(fields["joining_date"]))
     now = _now()
     doc = {
         "employee_no": fields.pop("employee_no", None) or _next_number(db),
         "designation": None, "department": None, "phone": None,
-        **fields, "status": "active", "user_id": None,
+        **fields, **probation, "status": "active", "user_id": None,
         "name_lc": fields["name"].lower(), "created_at": now, "updated_at": now, "created_by": by,
     }
     try:
@@ -199,6 +204,9 @@ def update(db: Database, employee_id: Any, data: Dict[str, Any], by: str) -> Tup
     changed = [k for k, v in fields.items() if current.get(k) != v]
     if "name" in fields:
         fields["name_lc"] = fields["name"].lower()
+    if "joining_date" in changed and "probation_end_date" in current and not current.get("probation_extensions") and not current.get("confirmed_on"):
+        # A corrected joining date moves the default probation end with it, unless HR has already extended or confirmed.
+        fields["probation_end_date"] = add_months(date.fromisoformat(fields["joining_date"]), company_policy.get_policy(db)["probation_months"]).isoformat()
     if not changed:
         return current, []
     fields.update(updated_at=_now(), updated_by=by)

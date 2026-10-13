@@ -32,6 +32,36 @@ class EmployeePatch(BaseModel):
     status: Optional[str] = Field(default=None, max_length=10)
 
 
+class ProbationExtensionOut(BaseModel):
+    from_date: str
+    to_date: str
+    reason: str
+    at: str
+
+
+class ProbationOut(BaseModel):
+    status: str  # on_probation | review_due | confirmed
+    end_date: str
+    confirmed_on: Optional[str] = None
+    extensions: List[ProbationExtensionOut] = []
+
+
+class NoticeAdjustmentOut(BaseModel):
+    from_date: str
+    to_date: str
+    reason: str
+    requested_by: str
+    at: str
+
+
+class NoticeOut(BaseModel):
+    given_on: str
+    last_working_day: str
+    basis: str  # probation | notice_period
+    note: Optional[str] = None
+    adjustments: List[NoticeAdjustmentOut] = []
+
+
 class EmployeeOut(BaseModel):
     id: str
     employee_no: str
@@ -45,6 +75,8 @@ class EmployeeOut(BaseModel):
     manager_name: Optional[str] = None
     status: str
     has_login: bool
+    probation: ProbationOut
+    notice: Optional[NoticeOut] = None
     created_at: str
     updated_at: str
 
