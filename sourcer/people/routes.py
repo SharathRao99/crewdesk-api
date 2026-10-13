@@ -4,8 +4,10 @@ from typing import Any, Callable, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from sourcer.api.deps import Context, audit, require_admin
+from sourcer import join
 from sourcer.people import lifecycle, policy as company_policy, store
-from sourcer.people.models import EmployeeIn, EmployeeList, EmployeeOption, EmployeeOut, EmployeePatch
+from sourcer.tenancy import registry
+from sourcer.people.models import EmployeeIn, EmployeeList, EmployeeOption, EmployeeOut, EmployeePatch, LoginLinkOut, LoginOut
 
 # Everything here needs the `people` module (set in app.py) and, for now, an administrator: employees get their own
 # self-service routes later. HR data is never readable by a recruiter or by another employee.
@@ -19,20 +21,26 @@ def _iso(value: Any) -> str:
     return value.replace(tzinfo=timezone.utc).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if value.tzinfo is None else value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _out(doc: Dict[str, Any], names: Dict[str, str], policy: Dict[str, Any]) -> EmployeeOut:
+def _out(doc: Dict[str, Any], names: Dict[str, str], policy: Dict[str, Any], login: bool = False) -> EmployeeOut:
     manager = str(doc["manager_id"]) if doc.get("manager_id") else None
     return EmployeeOut(
         id=str(doc["_id"]), employee_no=doc["employee_no"], name=doc["name"], work_email=doc["work_email"],
         phone=doc.get("phone"), designation=doc.get("designation"), department=doc.get("department"),
         joining_date=doc["joining_date"], manager_id=manager, manager_name=names.get(manager) if manager else None,
         status=doc.get("status", "active"), has_login=bool(doc.get("user_id")),
+        login=_login(doc) if login else None,
         probation=lifecycle.probation_info(doc, policy), notice=lifecycle.notice_info(doc),
         created_at=_iso(doc.get("created_at")), updated_at=_iso(doc.get("updated_at")),
     )
 
 
+def _login(doc: Dict[str, Any]) -> LoginOut:
+    info = registry.login_summary(doc.get("user_id"))
+    return LoginOut(state=info["state"], last_login=_iso(info["last_login"]) or None)
+
+
 def _one(ctx: Context, doc: Dict[str, Any]) -> EmployeeOut:
-    return _out(doc, store.names_of(ctx.db, [doc.get("manager_id")]), company_policy.get_policy(ctx.db))
+    return _out(doc, store.names_of(ctx.db, [doc.get("manager_id")]), company_policy.get_policy(ctx.db), login=True)
 
 
 def _guard(call: Callable[[], Any]) -> Any:
@@ -89,3 +97,40 @@ def update_employee(employee_id: str, body: EmployeePatch, ctx: Context = Depend
     if changed:
         audit(ctx, "employee_updated", {"employee": str(doc["_id"]), "fields": changed})  # field names only, never the values
     return _one(ctx, doc)
+
+
+# ---------- logins (HR creates a one-time link and hands it over by hand) ----------
+
+@router.post("/employees/{employee_id}/login-link", response_model=LoginLinkOut, status_code=201)
+def create_login_link(employee_id: str, ctx: Context = Depends(require_admin)) -> LoginLinkOut:
+    """Creates the employee's login if they have none, and a fresh single-use link. Older links and sessions stop working."""
+    emp = _guard(lambda: store.get(ctx.db, employee_id))
+    if emp.get("status") != "active":
+        raise HTTPException(422, "Only active employees can have a login")
+    user_id = emp.get("user_id")
+    if not user_id or not registry.get_user_by_id(user_id):
+        try:
+            user = registry.create_employee_user(emp["work_email"], ctx.tenant, str(emp["_id"]))
+        except ValueError as e:
+            raise HTTPException(422, str(e)) from None
+        user_id = user["_id"]
+        ctx.db["employees"].update_one({"_id": emp["_id"]}, {"$set": {"user_id": user_id}})
+    else:
+        registry.set_user_disabled(user_id, False)  # a new link turns a disabled login back on
+    token, expires = join.create_link(user_id, ctx.tenant, _by_user(ctx))
+    audit(ctx, "login_link_created", {"employee": employee_id})
+    return LoginLinkOut(token=token, expires_at=_iso(expires), email=emp["work_email"], name=emp["name"])
+
+
+@router.post("/employees/{employee_id}/login/disable", response_model=EmployeeOut)
+def disable_login(employee_id: str, ctx: Context = Depends(require_admin)) -> EmployeeOut:
+    emp = _guard(lambda: store.get(ctx.db, employee_id))
+    if not emp.get("user_id"):
+        raise HTTPException(422, "This employee has no login")
+    registry.set_user_disabled(emp["user_id"], True)
+    audit(ctx, "login_disabled", {"employee": employee_id})
+    return _one(ctx, _guard(lambda: store.get(ctx.db, employee_id)))
+
+
+def _by_user(ctx: Context) -> str:
+    return str(ctx.user["_id"])

@@ -192,6 +192,13 @@ def verify_login(email: str, password: str) -> Optional[Dict[str, Any]]:
     if locked and locked.replace(tzinfo=timezone.utc) > _now():
         return None
 
+    if not user.get("password_hash"):  # invited by a login link but has not chosen a password yet
+        try:
+            _hasher.verify(_DUMMY_HASH, password or "")
+        except (VerifyMismatchError, InvalidHashError):
+            pass
+        return None
+
     try:
         _hasher.verify(user["password_hash"], password or "")
     except (VerifyMismatchError, InvalidHashError):
@@ -238,3 +245,65 @@ def log_event(kind: str, email: str = "", tenant: str = "", ip: str = "") -> Non
 
 def set_avatar(user_id: Any, choice: Dict[str, str]) -> None:
     platform_db()["users"].update_one({"_id": user_id}, {"$set": {"avatar": choice}})
+
+
+# ---------- employee logins (created by HR, set up through a one-time link) ----------
+
+def create_employee_user(email: str, tenant: str, employee_id: str) -> Dict[str, Any]:
+    """A login for an employee, with no password yet: they choose one through the link HR gives them."""
+    get_tenant(tenant)
+    ensure_platform_indexes()
+    doc = {
+        "email": normalize_email(email), "tenant": tenant, "role": "employee", "employee_id": employee_id, "password_hash": None,
+        "must_change_password": False, "session_version": 0, "disabled": False, "failed_logins": 0, "locked_until": None,
+        "created_at": _now(), "last_login": None,
+    }
+    try:
+        platform_db()["users"].insert_one(doc)
+    except DuplicateKeyError:
+        raise ValueError("That email already has a login") from None
+    doc.pop("password_hash")
+    return doc
+
+
+def set_password(user_id: Any, password: str) -> None:
+    """Choose a password (through a login link). Ends every older session."""
+    if len(password or "") < 10:
+        raise ValueError("Use at least 10 characters")
+    if len(password) > 256:
+        raise ValueError("That password is too long")
+    platform_db()["users"].update_one(
+        {"_id": user_id},
+        {"$set": {"password_hash": _hasher.hash(password), "must_change_password": False, "failed_logins": 0, "locked_until": None}, "$inc": {"session_version": 1}},
+    )
+
+
+def set_user_disabled(user_id: Any, disabled: bool) -> None:
+    platform_db()["users"].update_one({"_id": user_id}, {"$set": {"disabled": disabled}, "$inc": {"session_version": 1}})
+
+
+def bump_session(user_id: Any) -> None:
+    platform_db()["users"].update_one({"_id": user_id}, {"$inc": {"session_version": 1}})
+
+
+def change_user_email(user_id: Any, new_email: str) -> None:
+    try:
+        platform_db()["users"].update_one({"_id": user_id}, {"$set": {"email": normalize_email(new_email)}})
+    except DuplicateKeyError:
+        raise ValueError("That email already has a login") from None
+
+
+def delete_user(user_id: Any) -> None:
+    platform_db()["users"].delete_one({"_id": user_id})
+    platform_db()["join_links"].delete_many({"user_id": user_id})
+
+
+def login_summary(user_id: Any) -> Dict[str, Any]:
+    """{state, last_login}: none (no login), invited (link not used yet), active, or disabled."""
+    if not user_id:
+        return {"state": "none", "last_login": None}
+    user = platform_db()["users"].find_one({"_id": user_id}, {"password_hash": 1, "disabled": 1, "last_login": 1})
+    if not user:
+        return {"state": "none", "last_login": None}
+    state = "disabled" if user.get("disabled") else "active" if user.get("password_hash") else "invited"
+    return {"state": state, "last_login": user.get("last_login")}

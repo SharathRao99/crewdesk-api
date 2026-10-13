@@ -62,6 +62,18 @@ class NoticeOut(BaseModel):
     adjustments: List[NoticeAdjustmentOut] = []
 
 
+class LoginOut(BaseModel):
+    state: str  # none | invited | active | disabled
+    last_login: Optional[str] = None
+
+
+class LoginLinkOut(BaseModel):
+    token: str  # shown once: only its hash is kept
+    expires_at: str
+    email: str
+    name: str
+
+
 class EmployeeOut(BaseModel):
     id: str
     employee_no: str
@@ -75,6 +87,7 @@ class EmployeeOut(BaseModel):
     manager_name: Optional[str] = None
     status: str
     has_login: bool
+    login: Optional[LoginOut] = None  # filled on the detail page
     probation: ProbationOut
     notice: Optional[NoticeOut] = None
     created_at: str

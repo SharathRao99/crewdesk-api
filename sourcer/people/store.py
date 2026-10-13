@@ -17,6 +17,7 @@ from pymongo.errors import DuplicateKeyError
 from sourcer.people import policy as company_policy
 from sourcer.people.dates import add_months
 from sourcer.people.errors import NotFound, PeopleError
+from sourcer.tenancy import registry
 from sourcer.tenancy.registry import normalize_email
 
 STATUSES = ("active", "inactive")
@@ -167,7 +168,7 @@ def create(db: Database, data: Dict[str, Any], by: str) -> Dict[str, Any]:
     doc = {
         "employee_no": fields.pop("employee_no", None) or _next_number(db),
         "designation": None, "department": None, "phone": None,
-        **fields, **probation, "status": "active", "user_id": None,
+        **fields, **probation, "status": "active", "user_id": None, "inactive_at": None, "anonymised_at": None,
         "name_lc": fields["name"].lower(), "created_at": now, "updated_at": now, "created_by": by,
     }
     try:
@@ -202,6 +203,10 @@ def update(db: Database, employee_id: Any, data: Dict[str, Any], by: str) -> Tup
         if reports:
             raise EmployeeError(f"{reports} active employee(s) still report to this person. Give them a new manager first")
     changed = [k for k, v in fields.items() if current.get(k) != v]
+    user_id = current.get("user_id")
+    if "status" in changed:
+        # Leaving ends their login at once; coming back does not turn it on again (HR makes a new link).
+        fields["inactive_at"] = _now() if fields["status"] == "inactive" else None
     if "name" in fields:
         fields["name_lc"] = fields["name"].lower()
     if "joining_date" in changed and "probation_end_date" in current and not current.get("probation_extensions") and not current.get("confirmed_on"):
@@ -210,10 +215,19 @@ def update(db: Database, employee_id: Any, data: Dict[str, Any], by: str) -> Tup
     if not changed:
         return current, []
     fields.update(updated_at=_now(), updated_by=by)
+    if user_id and "work_email" in changed:
+        try:
+            registry.change_user_email(user_id, fields["work_email"])  # the login follows the work email
+        except ValueError as e:
+            raise EmployeeError(str(e)) from None
     try:
         doc = db["employees"].find_one_and_update({"_id": current["_id"]}, {"$set": fields}, return_document=ReturnDocument.AFTER)
     except DuplicateKeyError as e:
+        if user_id and "work_email" in changed:
+            registry.change_user_email(user_id, current["work_email"])  # undo: the employee record refused it
         raise EmployeeError(_duplicate_message(e)) from None
+    if user_id and fields.get("status") == "inactive":
+        registry.set_user_disabled(user_id, True)
     return doc, changed
 
 

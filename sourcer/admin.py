@@ -113,6 +113,26 @@ def _retention_run(a):
         print(f"{slug}: removed {result['responses']} answers and {result['links']} links older than {a.days} days")
 
 
+def _people_anonymise(a):
+    """Erase a former employee's personal details (name, email, phone, notes, login), keeping leave totals."""
+    from sourcer.people import privacy
+
+    if a.confirm != a.employee:
+        sys.exit(f"This cannot be undone. Re-run with --confirm {a.employee}")
+    result = privacy.anonymise(tenant_db(a.tenant), a.employee, "admin-cli")
+    print(f"Anonymised employee {a.employee} in {a.tenant!r}: cleared {result['leave_records']} leave record(s) and {result['adjustments']} adjustment(s).")
+
+
+def _people_retention(a):
+    """Anonymise everyone who left more than --days ago. Not scheduled: run it when your policy says to."""
+    from sourcer.people import privacy
+
+    slugs = [t["slug"] for t in registry.list_tenants()] if a.all else [a.tenant]
+    for slug in slugs:
+        n = len(privacy.due_for_retention(tenant_db(slug), a.days)) if a.dry_run else privacy.run_retention(tenant_db(slug), a.days)
+        print(f"{slug}: {'would anonymise' if a.dry_run else 'anonymised'} {n} former employee(s) who left more than {a.days} days ago")
+
+
 def _user_create(a):
     user, password = registry.create_user(a.email, a.tenant, a.role, a.password)
     print(f"Created {user['role']} {user['email']} in {a.tenant!r}.")
@@ -167,6 +187,12 @@ def build_parser() -> argparse.ArgumentParser:
     ret = sub.add_parser("retention").add_subparsers(dest="cmd", required=True)
     p = ret.add_parser("run", help="delete old screening answers and links"); p.add_argument("--tenant"); p.add_argument("--all", action="store_true")
     p.add_argument("--days", type=int, default=180); p.set_defaults(func=_retention_run)
+
+    people = sub.add_parser("people").add_subparsers(dest="cmd", required=True)
+    p = people.add_parser("anonymise", help="erase a former employee's personal details"); p.add_argument("--tenant", required=True)
+    p.add_argument("--employee", required=True, help="the employee's id"); p.add_argument("--confirm", default=""); p.set_defaults(func=_people_anonymise)
+    p = people.add_parser("retention", help="anonymise people who left more than --days ago"); p.add_argument("--tenant"); p.add_argument("--all", action="store_true")
+    p.add_argument("--days", type=int, required=True); p.add_argument("--dry-run", action="store_true"); p.set_defaults(func=_people_retention)
 
     user = sub.add_parser("user").add_subparsers(dest="cmd", required=True)
     p = user.add_parser("create"); p.add_argument("--tenant", required=True); p.add_argument("--email", required=True)
