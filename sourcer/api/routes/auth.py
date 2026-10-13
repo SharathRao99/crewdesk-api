@@ -41,7 +41,29 @@ def login(body: LoginBody, request: Request) -> UserOut:
 
 @router.get("/me", response_model=UserOut)
 def me(ctx: Context = Depends(get_context)) -> UserOut:
-    return _user_out(ctx.user, ctx.tenant, ctx.tenant_name)
+    out = _user_out(ctx.user, ctx.tenant, ctx.tenant_name)
+    out.can_approve = _can_approve(ctx)
+    return out
+
+
+def _can_approve(ctx: Context) -> bool:
+    """HR can; a reporting manager can while the company allows manager approval."""
+    from sourcer.people import policy as company_policy
+    from sourcer.people import requests as people_requests
+    from sourcer.people import store
+
+    if ctx.user.get("role") == "admin":
+        return True
+    employee_id = ctx.user.get("employee_id")
+    if ctx.user.get("role") != "employee" or not employee_id or "people" not in modules.modules_for(ctx.user):
+        return False
+    if not company_policy.get_policy(ctx.db).get("manager_approval", True):
+        return False
+    try:
+        emp = store.get(ctx.db, employee_id)
+    except store.NotFound:
+        return False
+    return emp.get("status") == "active" and people_requests.is_manager(ctx.db, emp["_id"])
 
 
 @router.post("/me/password", response_model=SessionOut)

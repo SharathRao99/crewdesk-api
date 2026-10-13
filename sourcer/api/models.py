@@ -32,6 +32,7 @@ class UserOut(BaseModel):
     modules: List[str] = []
     session_version: int = 0
     avatar: AvatarOut = AvatarOut(style="thumbs", seed="")
+    can_approve: bool = False  # may decide employees' requests: HR, or a reporting manager (when the company allows it)
 
 
 class PasswordBody(BaseModel):

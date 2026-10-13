@@ -18,6 +18,7 @@ class PolicyOut(BaseModel):
     notice_period: PeriodIO
     probation_notice_period: PeriodIO
     prorate_new_joiners: bool
+    manager_approval: bool = True
     updated_at: Optional[str] = None
 
 
@@ -31,6 +32,7 @@ class PolicyPatch(BaseModel):
     notice_period: Optional[PeriodIO] = None
     probation_notice_period: Optional[PeriodIO] = None
     prorate_new_joiners: Optional[StrictBool] = None
+    manager_approval: Optional[StrictBool] = None
 
 
 class LeaveTypeOut(BaseModel):

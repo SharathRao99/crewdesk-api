@@ -240,6 +240,8 @@ def create(db: Database, data: Dict[str, Any], by: str) -> Dict[str, Any]:
                     "Tick 'record anyway' to go over the balance"
                 )
     approver_id, approver_name = _approver(db, data.get("approved_by_id"))
+    if approver_id is None and data.get("approved_by_label"):
+        approver_name = _text(data["approved_by_label"], "Approved by", 60)  # an approver who is not in the employee list, such as "HR"
     doc = {
         "employee_id": emp["_id"], "type_id": ltype["_id"], "type_code": ltype["code"], "type_name": ltype["name"],
         "start_date": iso(start), "end_date": iso(end), "day_part": data.get("day_part") or "full",
@@ -248,6 +250,8 @@ def create(db: Database, data: Dict[str, Any], by: str) -> Dict[str, Any]:
         "approved_by_id": approver_id, "approved_by_name": approver_name, "over_balance": over,
         "status": "recorded", "created_at": _now(), "created_by": by,
     }
+    if data.get("request_id"):
+        doc["request_id"] = data["request_id"]
     db["leave_records"].insert_one(doc)
     return doc
 

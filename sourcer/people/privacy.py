@@ -37,6 +37,8 @@ def anonymise(db: Database, employee_id: Any, by: str) -> Dict[str, Any]:
         registry.delete_user(emp["user_id"])  # the login, and any link still waiting to be used
     records = db["leave_records"].update_many({"employee_id": emp["_id"]}, {"$set": {"reason": None, "note": None, "cancel_reason": None, "approved_by_name": None}})
     db["leave_records"].update_many({"approved_by_id": emp["_id"]}, {"$set": {"approved_by_name": "Former employee"}})  # where they approved others' leave
+    db["requests"].update_many({"employee_id": emp["_id"]}, {"$set": {"reason": None, "decision_note": None}})
+    db["requests"].update_many({"decided_by.employee_id": str(emp["_id"])}, {"$set": {"decided_by.name": "Former employee"}})  # where they decided others' requests
     adjustments = db["leave_adjustments"].update_many({"employee_id": emp["_id"]}, {"$set": {"reason": REMOVED}})
     return {"leave_records": records.matched_count, "adjustments": adjustments.matched_count}
 

@@ -43,8 +43,11 @@ def ensure_indexes(db: Database) -> None:
     col.create_index("manager_id")
     from sourcer.people import leave  # here, not at the top: leave imports this module
 
+    from sourcer.people import requests as people_requests
+
     company_policy.ensure_indexes(db)
     leave.ensure_indexes(db)
+    people_requests.ensure_indexes(db)
 
 
 def oid(value: Any) -> ObjectId:
@@ -226,8 +229,12 @@ def update(db: Database, employee_id: Any, data: Dict[str, Any], by: str) -> Tup
         if user_id and "work_email" in changed:
             registry.change_user_email(user_id, current["work_email"])  # undo: the employee record refused it
         raise EmployeeError(_duplicate_message(e)) from None
-    if user_id and fields.get("status") == "inactive":
-        registry.set_user_disabled(user_id, True)
+    if fields.get("status") == "inactive":
+        from sourcer.people import requests as people_requests
+
+        people_requests.cancel_pending_for(db, current["_id"], "No longer employed")  # what they had waiting is withdrawn
+        if user_id:
+            registry.set_user_disabled(user_id, True)
     return doc, changed
 
 
