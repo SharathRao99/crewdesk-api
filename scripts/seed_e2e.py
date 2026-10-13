@@ -112,29 +112,48 @@ def seed_ordering_and_paging(db, project: str) -> None:
     db["candidates"].insert_many([person(many, f"m{i:03d}", f"Person {i:03d}", round(95 - i * 0.2, 1), "Bengaluru, India") for i in range(250)])
 
 
-def seed_people(project: str, kind: str = "p", many: bool = True) -> None:
+def seed_people(project: str, kind: str) -> None:
     """A company just for People tests in this browser project (employees are not scoped by project, so it needs its own).
 
-    kind "p" is read by the list tests and never changed; kind "q" is where tests that add or edit people work.
+    kind "p": read by the list tests and never changed (33 people, some leave, a holiday).
+    kind "q": where tests add and edit people and record leave (Asha, Ben, Chen only; default rules, never changed).
+    kind "r": where tests change the company's rules (nobody in it, so rule changes cannot disturb other tests).
     """
+    from datetime import date, timedelta
+
+    from sourcer.people import leave as leave_store
+    from sourcer.people import policy as company_policy
     from sourcer.people import store
     from sourcer.tenancy import registry
     from sourcer.tenancy.db import tenant_db
 
     slug = f"e2e-{kind}-{project}"
-    registry.create_tenant(slug, f"People {project.title()} Co" if kind == "p" else f"Write {project.title()} Co")
+    names = {"p": "People {} Co", "q": "Write {} Co", "r": "Rules {} Co"}
+    registry.create_tenant(slug, names[kind].format(project.title()))
     db = tenant_db(slug)
-    base = {"phone": None, "department": "Engineering"}
-    asha = store.create(db, {**base, "name": "Asha Rao", "work_email": f"asha@{slug}.test", "joining_date": "2022-04-01",
-                             "designation": "Engineering Manager", "employee_no": "E-001"}, "seed")
-    store.create(db, {**base, "name": "Ben Carter", "work_email": f"ben@{slug}.test", "joining_date": "2023-06-12",
-                      "designation": "Developer", "employee_no": "E-002", "manager_id": str(asha["_id"])}, "seed")
-    chen = store.create(db, {**base, "name": "Chen Wei", "work_email": f"chen@{slug}.test", "joining_date": "2021-01-04",
-                             "designation": "Designer", "department": "Design", "employee_no": "E-003"}, "seed")
-    store.update(db, chen["_id"], {"status": "inactive"}, "seed")
-    for i in range(1, 31 if many else 1):  # enough for several pages
-        store.create(db, {"name": f"Many Person {i:02d}", "work_email": f"many{i:02d}@{slug}.test", "joining_date": "2024-01-15",
-                          "department": "Operations", "employee_no": f"M-{i:03d}"}, "seed")
+    if kind != "r":
+        base = {"phone": None, "department": "Engineering"}
+        asha = store.create(db, {**base, "name": "Asha Rao", "work_email": f"asha@{slug}.test", "joining_date": "2022-04-01",
+                                 "designation": "Engineering Manager", "employee_no": "E-001"}, "seed")
+        ben = store.create(db, {**base, "name": "Ben Carter", "work_email": f"ben@{slug}.test", "joining_date": "2023-06-12",
+                                "designation": "Developer", "employee_no": "E-002", "manager_id": str(asha["_id"])}, "seed")
+        chen = store.create(db, {**base, "name": "Chen Wei", "work_email": f"chen@{slug}.test", "joining_date": "2021-01-04",
+                                 "designation": "Designer", "department": "Design", "employee_no": "E-003"}, "seed")
+        store.update(db, chen["_id"], {"status": "inactive"}, "seed")
+        if kind == "p":
+            for i in range(1, 31):  # enough for several pages
+                store.create(db, {"name": f"Many Person {i:02d}", "work_email": f"many{i:02d}@{slug}.test", "joining_date": "2024-01-15",
+                                  "department": "Operations", "employee_no": f"M-{i:03d}"}, "seed")
+            # Ben took three planned days (Mon-Wed of the first full week of March this year) and had one leave cancelled.
+            march = date(date.today().year, 3, 1)
+            monday = march + timedelta(days=(7 - march.weekday()) % 7)
+            types = {t["code"]: t for t in company_policy.list_types(db)}
+            leave_store.create(db, {"employee_id": str(ben["_id"]), "type_id": str(types["PL"]["_id"]), "start_date": monday.isoformat(),
+                                    "end_date": (monday + timedelta(days=2)).isoformat(), "reason": "Family trip", "approved_by_id": str(asha["_id"])}, "seed")
+            gone = leave_store.create(db, {"employee_id": str(ben["_id"]), "type_id": str(types["SL"]["_id"]),
+                                           "start_date": (monday + timedelta(days=7)).isoformat()}, "seed")
+            leave_store.cancel(db, gone["_id"], "Plans changed", "seed")
+            company_policy.create_holiday(db, {"date": date(date.today().year, 12, 25).isoformat(), "name": "Year End Day"}, "seed")
     for role, label in (("admin", "ready"), ("recruiter", "recruiter"), ("employee", "employee")):
         email = f"{label}-{project}@{slug}.test"
         registry.create_user(email, slug, role, INITIAL_PASSWORD)
@@ -155,6 +174,7 @@ def main() -> None:
     for project in PROJECTS:
         client().drop_database(tenant_db_name(f"e2e-p-{project}"))
         client().drop_database(tenant_db_name(f"e2e-q-{project}"))
+        client().drop_database(tenant_db_name(f"e2e-r-{project}"))
     tokens: dict = {}
 
     for slug, name, logins in COMPANIES:
@@ -191,8 +211,8 @@ def main() -> None:
                 registry.create_user(rec, slug, "recruiter", INITIAL_PASSWORD)
                 registry.change_password(rec, INITIAL_PASSWORD, READY_PASSWORD)
     for project in PROJECTS:
-        seed_people(project, "p", many=True)
-        seed_people(project, "q", many=False)
+        for kind in ("p", "q", "r"):
+            seed_people(project, kind)
     out = os.getenv("E2E_SEED_OUT")
     if out:
         with open(out, "w") as f:

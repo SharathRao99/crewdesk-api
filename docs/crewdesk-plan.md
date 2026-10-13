@@ -44,3 +44,30 @@ Admin accounts keep today's command (`sourcer-admin user create`).
 2. People: employees.
 3. People: leave policy, holidays, leave records.
 4. People: balances and employee login (magic link, `/join/<token>`, self-service view).
+
+
+## Phase 4 as built (leave, company rules, probation, notice)
+
+Everything below is **per company** (stored in that company's own database, edited by its HR administrators). A new
+company starts from the defaults and changes them; nothing is shared or hardcoded to one organisation.
+
+- **Company rules** (`company_policy`): leave year start month (1 = calendar year), weekly off days (default Sat and Sun),
+  probation length for new joiners (default 6 months, 0 = none), notice period (default 2 months), notice period during
+  probation (default 7 days), and whether new joiners' leave is prorated (default off: full yearly days).
+- **Leave types** (`leave_types`): start as Planned (18), Sick (12) and Unpaid (no limit). There is no casual leave unless
+  HR adds it. HR can add, edit (not the short code) and retire types; each has days per year (half-day steps), carry-forward cap,
+  paid or unpaid, and whether it counts weekends and holidays. Retired types keep their history.
+- **Holidays** (`holidays`): one per date; not counted as leave.
+- **Leave records** (`leave_records`): HR records who took what and when. Days are counted by the server (weekly off days and
+  holidays skipped), half days allowed on a single date, no two leaves on the same day (two halves are fine), split across leave
+  years when a leave spans a year end. Going over the balance needs an explicit "record anyway" and is marked over balance.
+  Approved by is optional. Dates cannot be edited: cancel and record again (a cancelled leave returns its days).
+- **Balances**: entitlement + carry-forward (capped per type) + HR adjustments (with a reason) - days used, per leave year.
+- **Probation**: new employees get an end date from the company's rule. HR can extend it (reason kept) or confirm. Ended but not
+  confirmed shows "Review due" and still counts as probation. Records from before this existed count as confirmed.
+- **Notice**: the last working day is the notice date plus the company's notice period (the probation period if not yet confirmed
+  on that date). HR can move it, noting whether the employee or the company asked; every change is kept. Withdrawable.
+- Employee self-service (viewing own balance, requesting leave or an extension) is Phase 5.
+
+Assumptions to confirm with the user: Sick leave 12 days; probation staff get the same yearly leave as everyone; the leave year
+is the calendar year; weekends are Saturday and Sunday; no proration of the first year.
