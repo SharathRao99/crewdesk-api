@@ -118,6 +118,7 @@ def seed_people(project: str, kind: str) -> None:
     kind "p": read by the list tests and never changed (33 people, some leave, a holiday).
     kind "q": where tests add and edit people and record leave (Asha, Ben, Chen only; default rules, never changed).
     kind "r": where tests change the company's rules (nobody in it, so rule changes cannot disturb other tests).
+    kind "s": where the manager-approval switch is turned off and on (its own company: the rules page saves every rule at once).
     """
     from datetime import date, timedelta
 
@@ -128,10 +129,10 @@ def seed_people(project: str, kind: str) -> None:
     from sourcer.tenancy.db import tenant_db
 
     slug = f"e2e-{kind}-{project}"
-    names = {"p": "People {} Co", "q": "Write {} Co", "r": "Rules {} Co"}
+    names = {"p": "People {} Co", "q": "Write {} Co", "r": "Rules {} Co", "s": "Switch {} Co"}
     registry.create_tenant(slug, names[kind].format(project.title()))
     db = tenant_db(slug)
-    if kind != "r":
+    if kind not in ("r", "s"):
         base = {"phone": None, "department": "Engineering"}
         asha = store.create(db, {**base, "name": "Asha Rao", "work_email": f"asha@{slug}.test", "joining_date": "2022-04-01",
                                  "designation": "Engineering Manager", "employee_no": "E-001"}, "seed")
@@ -175,6 +176,7 @@ def main() -> None:
         client().drop_database(tenant_db_name(f"e2e-p-{project}"))
         client().drop_database(tenant_db_name(f"e2e-q-{project}"))
         client().drop_database(tenant_db_name(f"e2e-r-{project}"))
+        client().drop_database(tenant_db_name(f"e2e-s-{project}"))
     tokens: dict = {}
 
     for slug, name, logins in COMPANIES:
@@ -211,7 +213,7 @@ def main() -> None:
                 registry.create_user(rec, slug, "recruiter", INITIAL_PASSWORD)
                 registry.change_password(rec, INITIAL_PASSWORD, READY_PASSWORD)
     for project in PROJECTS:
-        for kind in ("p", "q", "r"):
+        for kind in ("p", "q", "r", "s"):
             seed_people(project, kind)
     out = os.getenv("E2E_SEED_OUT")
     if out:
