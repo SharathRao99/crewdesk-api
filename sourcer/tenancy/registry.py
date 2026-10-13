@@ -31,7 +31,7 @@ def _now() -> datetime:
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
-def _norm_email(email: str) -> str:
+def normalize_email(email: str) -> str:
     email = (email or "").strip().lower()
     if len(email) > 254 or not _EMAIL_RE.match(email):
         raise ValueError(f"Invalid email {email[:60]!r}")
@@ -52,6 +52,9 @@ def ensure_tenant_indexes(slug: str) -> None:
     db["candidates"].create_index("status")
     db["audit_log"].create_index("at", expireAfterSeconds=AUDIT_DAYS * 86400)
     db["audit_log"].create_index([("action", ASCENDING), ("at", DESCENDING)])
+    from sourcer.people import store as people_store
+
+    people_store.ensure_indexes(db)
 
 
 # ---------- tenants ----------
@@ -111,7 +114,7 @@ def create_user(email: str, tenant: str, role: str = "recruiter", password: Opti
     ensure_platform_indexes()
     password = password or new_password()
     doc = {
-        "email": _norm_email(email),
+        "email": normalize_email(email),
         "tenant": tenant,
         "role": role,
         "password_hash": _hasher.hash(password),
@@ -148,7 +151,7 @@ def get_user_by_id(user_id: Any) -> Optional[Dict[str, Any]]:
 def reset_password(email: str) -> str:
     password = new_password()
     result = platform_db()["users"].update_one(
-        {"email": _norm_email(email)},
+        {"email": normalize_email(email)},
         {"$set": {"password_hash": _hasher.hash(password), "must_change_password": True, "failed_logins": 0, "locked_until": None},
          "$inc": {"session_version": 1}},
     )
@@ -159,7 +162,7 @@ def reset_password(email: str) -> str:
 
 def set_disabled(email: str, disabled: bool) -> None:
     result = platform_db()["users"].update_one(
-        {"email": _norm_email(email)}, {"$set": {"disabled": disabled}, "$inc": {"session_version": 1}}
+        {"email": normalize_email(email)}, {"$set": {"disabled": disabled}, "$inc": {"session_version": 1}}
     )
     if not result.matched_count:
         raise ValueError(f"No user {email!r}")
@@ -172,7 +175,7 @@ def verify_login(email: str, password: str) -> Optional[Dict[str, Any]]:
     the account is locked for LOCKOUT, whatever the next password is.
     """
     try:
-        email = _norm_email(email)
+        email = normalize_email(email)
     except ValueError:
         email = ""
     users = platform_db()["users"]
@@ -215,7 +218,7 @@ def change_password(email: str, old: str, new: str) -> bool:
     if not verify_login(email, old):
         return False
     platform_db()["users"].update_one(
-        {"email": _norm_email(email)},
+        {"email": normalize_email(email)},
         {"$set": {"password_hash": _hasher.hash(new), "must_change_password": False}, "$inc": {"session_version": 1}},
     )
     return True

@@ -10,6 +10,7 @@ from typing import Dict
 from fastapi import Depends, FastAPI
 
 from sourcer.api.deps import require_module
+from sourcer.people import routes as people_routes
 from sourcer.api.routes import auth, candidates, export, jobs, public, roles, templates
 
 app = FastAPI(title="Talent Sourcer API", version="0.2.0")
@@ -27,3 +28,6 @@ for module in (auth, public):
 # Hiring: a router added here cannot forget the module check.
 for module in (candidates, roles, jobs, templates, export):
     app.include_router(module.router, dependencies=[Depends(require_module("hiring"))])
+
+# People: same rule, its own module.
+app.include_router(people_routes.router, dependencies=[Depends(require_module("people"))])
