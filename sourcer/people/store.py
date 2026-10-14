@@ -117,6 +117,10 @@ def clean(data: Dict[str, Any], partial: bool = False) -> Dict[str, Any]:
         out["status"] = data["status"]
     if present("manager_id"):
         out["manager_id"] = data["manager_id"] or None
+    if present("is_manager"):
+        if data["is_manager"] is not None and not isinstance(data["is_manager"], bool):
+            raise EmployeeError("Manager must be on or off")
+        out["manager_role"] = data["is_manager"]  # None = follow the reporting line
     return out
 
 
@@ -147,6 +151,12 @@ def _check_manager(db: Database, employee_id: Optional[ObjectId], manager_id: Op
     return manager
 
 
+def _make_manager(db: Database, manager_id: Optional[ObjectId]) -> None:
+    """Giving someone a team makes them a manager, unless HR has already said they are not (that choice stays)."""
+    if manager_id:
+        db["employees"].update_one({"_id": manager_id, "manager_role": None}, {"$set": {"manager_role": True}})
+
+
 def _next_number(db: Database) -> str:
     """EMP-0001, EMP-0002 ...: a counter per company, never reused."""
     while True:
@@ -174,10 +184,12 @@ def create(db: Database, data: Dict[str, Any], by: str) -> Dict[str, Any]:
         **fields, **probation, "status": "active", "user_id": None, "inactive_at": None, "anonymised_at": None,
         "name_lc": fields["name"].lower(), "created_at": now, "updated_at": now, "created_by": by,
     }
+    doc.setdefault("manager_role", None)
     try:
         db["employees"].insert_one(doc)
     except DuplicateKeyError as e:
         raise EmployeeError(_duplicate_message(e)) from None
+    _make_manager(db, fields["manager_id"])
     return doc
 
 
@@ -229,6 +241,8 @@ def update(db: Database, employee_id: Any, data: Dict[str, Any], by: str) -> Tup
         if user_id and "work_email" in changed:
             registry.change_user_email(user_id, current["work_email"])  # undo: the employee record refused it
         raise EmployeeError(_duplicate_message(e)) from None
+    if "manager_id" in changed:
+        _make_manager(db, fields["manager_id"])
     if fields.get("status") == "inactive":
         from sourcer.people import requests as people_requests
 
@@ -272,4 +286,4 @@ def names_of(db: Database, ids: List[Any]) -> Dict[str, str]:
 
 def options(db: Database) -> List[Dict[str, Any]]:
     """Active employees as (id, name, employee_no): the choices for a manager picker."""
-    return list(db["employees"].find({"status": "active"}, {"name": 1, "employee_no": 1}).sort("name_lc", 1).limit(1000))
+    return list(db["employees"].find({"status": "active"}, {"name": 1, "employee_no": 1, "manager_role": 1}).sort("name_lc", 1).limit(1000))

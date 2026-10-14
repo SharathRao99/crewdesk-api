@@ -311,9 +311,9 @@ def test_who_can_approve_follows_the_reporting_line(api, c, team):
     assert c.get("/me").json()["can_approve"] is True  # HR
     r = ask(asha, c, day(0)).json()
     c.patch(f"/people/employees/{asha.e['id']}", {"manager_id": dan.e["id"]})  # Asha now reports to Dan
-    assert boss.get("/people/requests").status_code == 403 and boss.post(f"/people/requests/{r['id']}/approve").status_code == 403  # Boss manages nobody now
+    assert boss.get("/people/requests").json()["total"] == 0 and boss.post(f"/people/requests/{r['id']}/approve").status_code == 404  # Boss is still a manager (the role stays until HR removes it), but Asha is not theirs now
     assert [i["id"] for i in dan.get("/people/requests").json()["items"]] == [r["id"]]  # the current manager decides, even for an older request
-    assert dan.get("/me").json()["can_approve"] is True and boss.get("/me").json()["can_approve"] is False
+    assert dan.get("/me").json()["can_approve"] is True and boss.get("/me").json()["can_approve"] is True  # Dan became a manager when given Asha
     assert dan.post(f"/people/requests/{r['id']}/approve").status_code == 200
 
 
@@ -460,3 +460,83 @@ def test_audit_and_indexes_exist_for_new_companies(two_tenants):
 
     admin.main(["indexes", "ensure", "--all"])
     assert any(i["name"].startswith("employee_id_") for i in tenant_db("acme")["requests"].list_indexes())
+
+
+# ---------- the manager role ----------
+
+def emp_of(c, p):
+    return c.get(f"/people/employees/{p.e['id']}").json()
+
+
+def test_giving_someone_a_team_makes_them_a_manager(api, c):
+    boss = person(api, c, "Boss")
+    assert emp_of(c, boss)["is_manager"] is False and emp_of(c, boss)["manager_role"] is None
+    asha = person(api, c, "Asha", manager=boss)
+    e = emp_of(c, boss)
+    assert e["is_manager"] is True and e["manager_role"] is True  # switched on when Asha was given to them
+    assert boss.get("/me").json()["can_approve"] is True
+    assert asha.get("/me").json()["can_approve"] is False
+    opts = {o["name"]: o for o in c.get("/people/employees/options").json()}
+    assert opts["Boss"]["is_manager"] is True and opts["Asha"]["is_manager"] is False and opts["Asha"]["manager_role"] is None
+    listed = {i["name"]: i["is_manager"] for i in c.get("/people/employees").json()["items"]}
+    assert listed == {"Boss": True, "Asha": False}
+
+
+def test_hr_can_make_someone_a_manager_before_they_have_a_team(api, c):
+    lead = person(api, c, "Lead")
+    assert lead.get("/me").json()["can_approve"] is False
+    assert lead.get("/people/requests").status_code == 403
+    assert c.patch(f"/people/employees/{lead.e['id']}", {"is_manager": True}).json()["is_manager"] is True
+    assert lead.get("/me").json()["can_approve"] is True
+    assert lead.get("/people/requests").json()["total"] == 0  # ready, and nothing waiting yet
+    assert lead.get("/people/requests/summary").json() == {"pending": 0, "can_approve": True}
+    new = person(api, c, "New", manager=lead)
+    r = ask(new, c, day(0)).json()
+    assert [i["id"] for i in lead.get("/people/requests").json()["items"]] == [r["id"]]
+
+
+def test_hr_can_take_the_role_away_and_it_stays_off(api, c, team):
+    boss, asha, _ = team
+    r = ask(asha, c, day(0)).json()
+    off = c.patch(f"/people/employees/{boss.e['id']}", {"is_manager": False}).json()
+    assert off["is_manager"] is False and off["manager_role"] is False
+    assert boss.get("/me").json()["can_approve"] is False
+    assert boss.get("/people/requests").status_code == 403 and boss.post(f"/people/requests/{r['id']}/approve").status_code == 403
+    assert asha.get("/people/me/request-routing").json() == {"manager_name": None, "hr": True}  # the page says it goes to HR
+    person(api, c, "Another", manager=boss)  # giving them more people does not turn it back on
+    assert emp_of(c, boss)["is_manager"] is False and boss.get("/me").json()["can_approve"] is False
+    assert c.post(f"/people/requests/{r['id']}/approve").status_code == 200  # HR can still decide
+    back = c.patch(f"/people/employees/{boss.e['id']}", {"is_manager": None}).json()  # back to following the reporting line
+    assert back["manager_role"] is None and back["is_manager"] is True
+    assert boss.get("/me").json()["can_approve"] is True
+
+
+def test_records_from_before_the_role_existed_follow_the_reporting_line(api, c, team):
+    from bson import ObjectId
+
+    from sourcer.tenancy.db import tenant_db
+
+    boss, asha, dan = team
+    tenant_db("acme")["employees"].update_many({}, {"$unset": {"manager_role": ""}})
+    assert boss.get("/me").json()["can_approve"] is True and dan.get("/me").json()["can_approve"] is False
+    assert emp_of(c, boss)["is_manager"] is True and emp_of(c, dan)["is_manager"] is False
+    r = ask(asha, c, day(0)).json()
+    assert boss.post(f"/people/requests/{r['id']}/approve").status_code == 200
+
+
+def test_only_hr_sets_the_role_and_it_must_be_a_real_yes_or_no(api, c, team):
+    boss, asha, _ = team
+    assert asha.post(f"/people/employees/{asha.e['id']}", {"is_manager": True}).status_code in (404, 405)
+    assert api.patch(f"/people/employees/{asha.e['id']}", json={"is_manager": True}, headers=asha.h).status_code == 403
+    assert api.patch(f"/people/employees/{boss.e['id']}", json={"is_manager": False}, headers=boss.h).status_code == 403  # not even their own
+    for bad in ("yes", 1, "true", []):
+        assert c.patch(f"/people/employees/{asha.e['id']}", {"is_manager": bad}).status_code == 422, bad
+    created = c.post("/people/employees", {"name": "Made", "work_email": "made@acme.com", "joining_date": "2024-01-15", "is_manager": True}).json()
+    assert created["is_manager"] is True and created["manager_role"] is True
+
+
+def test_the_company_switch_still_wins_over_the_role(api, c, team):
+    boss, asha, _ = team
+    c.patch("/people/policy", {"manager_approval": False})
+    assert emp_of(c, boss)["is_manager"] is True  # the role stays
+    assert boss.get("/me").json()["can_approve"] is False  # but nobody uses it while the company has it off

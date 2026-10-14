@@ -63,7 +63,7 @@ def _can_approve(ctx: Context) -> bool:
         emp = store.get(ctx.db, employee_id)
     except store.NotFound:
         return False
-    return emp.get("status") == "active" and people_requests.is_manager(ctx.db, emp["_id"])
+    return emp.get("status") == "active" and people_requests.is_manager(ctx.db, emp)
 
 
 @router.post("/me/password", response_model=SessionOut)

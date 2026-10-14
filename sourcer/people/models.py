@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 
 class EmployeeIn(BaseModel):
@@ -15,6 +15,7 @@ class EmployeeIn(BaseModel):
     designation: Optional[str] = Field(default=None, max_length=80)
     department: Optional[str] = Field(default=None, max_length=80)
     manager_id: Optional[str] = Field(default=None, max_length=24)
+    is_manager: Optional[StrictBool] = None  # leave out to follow the reporting line
 
 
 class EmployeePatch(BaseModel):
@@ -30,6 +31,7 @@ class EmployeePatch(BaseModel):
     department: Optional[str] = Field(default=None, max_length=80)
     manager_id: Optional[str] = Field(default=None, max_length=24)
     status: Optional[str] = Field(default=None, max_length=10)
+    is_manager: Optional[StrictBool] = None  # true/false sets it; sending null goes back to following the reporting line
 
 
 class ProbationExtensionOut(BaseModel):
@@ -85,6 +87,8 @@ class EmployeeOut(BaseModel):
     joining_date: str
     manager_id: Optional[str] = None
     manager_name: Optional[str] = None
+    is_manager: bool = False  # can approve their team's requests (HR set it, or they have people reporting to them)
+    manager_role: Optional[bool] = None  # what HR chose: true, false, or null = follows the reporting line
     status: str
     has_login: bool
     login: Optional[LoginOut] = None  # filled on the detail page
@@ -105,3 +109,5 @@ class EmployeeOption(BaseModel):
     id: str
     name: str
     employee_no: str
+    is_manager: bool = False
+    manager_role: Optional[bool] = None

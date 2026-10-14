@@ -26,7 +26,7 @@ def require_decider(ctx: Context = Depends(get_context)) -> Tuple[Context, Decid
             emp = store.get(ctx.db, employee_id)
         except store.NotFound:
             emp = None
-        if emp and emp.get("status") == "active" and people_requests.is_manager(ctx.db, emp["_id"]):
+        if emp and emp.get("status") == "active" and people_requests.is_manager(ctx.db, emp):
             return ctx, {"kind": "manager", "user_id": ctx.user["_id"], "employee_id": emp["_id"], "name": emp["name"]}
     raise HTTPException(403, "You cannot decide requests")
 

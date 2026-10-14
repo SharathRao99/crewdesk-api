@@ -1,11 +1,11 @@
 from datetime import timezone
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from sourcer.api.deps import Context, audit, require_admin
 from sourcer import join
-from sourcer.people import lifecycle, policy as company_policy, store
+from sourcer.people import lifecycle, policy as company_policy, requests as people_requests, store
 from sourcer.tenancy import registry
 from sourcer.people.models import EmployeeIn, EmployeeList, EmployeeOption, EmployeeOut, EmployeePatch, LoginLinkOut, LoginOut
 
@@ -21,7 +21,7 @@ def _iso(value: Any) -> str:
     return value.replace(tzinfo=timezone.utc).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ") if value.tzinfo is None else value.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _out(doc: Dict[str, Any], names: Dict[str, str], policy: Dict[str, Any], login: bool = False) -> EmployeeOut:
+def _out(doc: Dict[str, Any], names: Dict[str, str], policy: Dict[str, Any], login: bool = False, can_manage: bool = False) -> EmployeeOut:
     manager = str(doc["manager_id"]) if doc.get("manager_id") else None
     return EmployeeOut(
         id=str(doc["_id"]), employee_no=doc["employee_no"], name=doc["name"], work_email=doc["work_email"],
@@ -29,6 +29,7 @@ def _out(doc: Dict[str, Any], names: Dict[str, str], policy: Dict[str, Any], log
         joining_date=doc["joining_date"], manager_id=manager, manager_name=names.get(manager) if manager else None,
         status=doc.get("status", "active"), has_login=bool(doc.get("user_id")),
         login=_login(doc) if login else None,
+        is_manager=can_manage, manager_role=doc.get("manager_role"),
         probation=lifecycle.probation_info(doc, policy), notice=lifecycle.notice_info(doc),
         created_at=_iso(doc.get("created_at")), updated_at=_iso(doc.get("updated_at")),
     )
@@ -40,7 +41,7 @@ def _login(doc: Dict[str, Any]) -> LoginOut:
 
 
 def _one(ctx: Context, doc: Dict[str, Any]) -> EmployeeOut:
-    return _out(doc, store.names_of(ctx.db, [doc.get("manager_id")]), company_policy.get_policy(ctx.db), login=True)
+    return _out(doc, store.names_of(ctx.db, [doc.get("manager_id")]), company_policy.get_policy(ctx.db), login=True, can_manage=people_requests.is_manager(ctx.db, doc))
 
 
 def _guard(call: Callable[[], Any]) -> Any:
@@ -51,6 +52,13 @@ def _guard(call: Callable[[], Any]) -> Any:
         raise HTTPException(404, str(e)) from None
     except store.EmployeeError as e:
         raise HTTPException(422, str(e)) from None
+
+
+def _has_reports(ctx: Context, docs: List[Dict[str, Any]]) -> set:
+    """Which of these people have someone reporting to them (one query for the whole page)."""
+    ids = [d["_id"] for d in docs]
+    return {str(r["_id"]) for r in ctx.db["employees"].aggregate([
+        {"$match": {"manager_id": {"$in": ids}, "status": "active"}}, {"$group": {"_id": "$manager_id"}}])}
 
 
 @router.get("/employees", response_model=EmployeeList)
@@ -66,12 +74,19 @@ def list_employees(
     docs, total = _guard(lambda: store.list_employees(ctx.db, q, status, sort, order, page, page_size))
     names = store.names_of(ctx.db, [d.get("manager_id") for d in docs])
     policy = company_policy.get_policy(ctx.db)
-    return EmployeeList(items=[_out(d, names, policy) for d in docs], total=total, page=page, page_size=page_size)
+    reporting = _has_reports(ctx, docs)
+    return EmployeeList(items=[_out(d, names, policy, can_manage=bool(d.get("manager_role")) if d.get("manager_role") is not None else str(d["_id"]) in reporting) for d in docs], total=total, page=page, page_size=page_size)
 
 
 @router.get("/employees/options", response_model=List[EmployeeOption])
 def employee_options(ctx: Context = Depends(require_admin)) -> List[EmployeeOption]:
-    return [EmployeeOption(id=str(d["_id"]), name=d["name"], employee_no=d["employee_no"]) for d in store.options(ctx.db)]
+    docs = store.options(ctx.db)
+    reporting = _has_reports(ctx, docs)
+    return [
+        EmployeeOption(id=str(d["_id"]), name=d["name"], employee_no=d["employee_no"], manager_role=d.get("manager_role"),
+                       is_manager=d["manager_role"] if d.get("manager_role") is not None else str(d["_id"]) in reporting)
+        for d in docs
+    ]
 
 
 @router.post("/employees", response_model=EmployeeOut, status_code=201)

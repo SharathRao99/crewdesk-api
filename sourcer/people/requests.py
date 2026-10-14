@@ -58,8 +58,18 @@ def reports_of(db: Database, manager_id: ObjectId) -> List[ObjectId]:
     return [d["_id"] for d in db["employees"].find({"manager_id": manager_id, "status": "active"}, {"_id": 1})]
 
 
-def is_manager(db: Database, employee_id: ObjectId) -> bool:
+def has_reports(db: Database, employee_id: ObjectId) -> bool:
     return db["employees"].count_documents({"manager_id": employee_id, "status": "active"}, limit=1) > 0
+
+
+def is_manager(db: Database, emp: Dict[str, Any]) -> bool:
+    """Is this person a manager who can approve their team's requests?
+
+    HR sets it on the person (`manager_role`). Until HR has chosen either way it follows the reporting line: someone
+    who has people reporting to them is a manager. Saying "off" is deliberate and stays off.
+    """
+    chosen = emp.get("manager_role")
+    return bool(chosen) if chosen is not None else has_reports(db, emp["_id"])
 
 
 def can_decide(db: Database, request: Dict[str, Any], decider: Dict[str, Any], policy: Dict[str, Any]) -> bool:
@@ -76,8 +86,9 @@ def routing(db: Database, emp: Dict[str, Any], policy: Dict[str, Any]) -> Dict[s
     """Who a request from this employee goes to: the manager (when allowed and active) and always HR."""
     manager = None
     if policy.get("manager_approval", True) and emp.get("manager_id"):
-        m = db["employees"].find_one({"_id": emp["manager_id"], "status": "active"}, {"name": 1})
-        manager = m["name"] if m else None
+        m = db["employees"].find_one({"_id": emp["manager_id"], "status": "active"}, {"name": 1, "manager_role": 1})
+        if m and (m.get("manager_role") is None or m["manager_role"]):  # (a person HR has set to "not a manager" cannot approve)
+            manager = m["name"]
     return {"manager_name": manager, "hr": True}
 
 
