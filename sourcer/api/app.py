@@ -14,6 +14,7 @@ from sourcer.people import routes as people_routes
 from sourcer.people import routes_leave as people_leave_routes
 from sourcer.people import routes_requests as people_request_routes
 from sourcer.people import routes_self as people_self_routes
+from sourcer.people import routes_wfh as people_wfh_routes
 from sourcer.api.routes import auth, candidates, export, jobs, join, public, roles, templates
 
 app = FastAPI(title="Talent Sourcer API", version="0.2.0")
@@ -33,5 +34,5 @@ for module in (candidates, roles, jobs, templates, export):
     app.include_router(module.router, dependencies=[Depends(require_module("hiring"))])
 
 # People: same rule, its own module.
-for module in (people_routes, people_leave_routes, people_self_routes, people_request_routes):
+for module in (people_routes, people_leave_routes, people_self_routes, people_request_routes, people_wfh_routes):
     app.include_router(module.router, dependencies=[Depends(require_module("people"))])

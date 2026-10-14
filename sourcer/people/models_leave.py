@@ -19,6 +19,8 @@ class PolicyOut(BaseModel):
     probation_notice_period: PeriodIO
     prorate_new_joiners: bool
     manager_approval: bool = True
+    wfh_enabled: bool = True
+    wfh_monthly_limit: int = 0
     updated_at: Optional[str] = None
 
 
@@ -33,6 +35,8 @@ class PolicyPatch(BaseModel):
     probation_notice_period: Optional[PeriodIO] = None
     prorate_new_joiners: Optional[StrictBool] = None
     manager_approval: Optional[StrictBool] = None
+    wfh_enabled: Optional[StrictBool] = None
+    wfh_monthly_limit: Optional[int] = Field(default=None, ge=0, le=31)
 
 
 class LeaveTypeOut(BaseModel):

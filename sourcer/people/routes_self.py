@@ -7,12 +7,14 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from sourcer.api.deps import Context, audit, get_context
-from sourcer.people import leave, policy as company_policy, requests as people_requests, store
+from sourcer.people import leave, policy as company_policy, requests as people_requests, store, wfh
 from sourcer.people.models import EmployeeOut
 from sourcer.people.models_leave import BalancesOut, HolidayOut, LeaveList, LeavePreviewOut, PolicyOut
 from sourcer.people.models_requests import LeaveRequestIn, LeaveRequestPreviewIn, NoticeRequestIn, RequestOut, RoutingOut
+from sourcer.people.models_wfh import WfhMine, WfhPreviewOut, WfhRequestIn, WfhSelfPreviewIn
 from sourcer.people.routes import _guard, _iso, _one
 from sourcer.people.routes_requests import request_out
+from sourcer.people.routes_wfh import _this_month, wfh_out
 from sourcer.people.routes_leave import _holiday_out, _leave_out, _policy_out
 
 router = APIRouter(prefix="/people/me", tags=["people-self"])
@@ -114,4 +116,31 @@ def cancel_my_request(request_id: str, me: Tuple[Context, Dict[str, Any]] = Depe
     ctx, emp = me
     doc = _guard(lambda: people_requests.cancel(ctx.db, request_id, emp))
     audit(ctx, "request_cancelled", {"request": request_id})
+    return request_out(ctx, doc, {str(emp["_id"]): emp["name"]})
+
+
+# ---------- work from home ----------
+
+@router.get("/wfh", response_model=WfhMine)
+def my_wfh(month: str = Query(default="", max_length=7), me: Tuple[Context, Dict[str, Any]] = Depends(require_self)) -> WfhMine:
+    """The employee's own month: days used against the company's limit, and each record."""
+    ctx, emp = me
+    month = month or _this_month()
+    policy = company_policy.get_policy(ctx.db)
+    docs, _ = _guard(lambda: wfh.list_records(ctx.db, None, emp["_id"], month, "", 1, wfh.MAX_PAGE_SIZE))
+    return WfhMine(month=month, label=wfh.month_label(month), used=wfh.month_used(ctx.db, emp["_id"], month), limit=int(policy.get("wfh_monthly_limit", 0)),
+                   enabled=bool(policy.get("wfh_enabled", True)), items=[wfh_out(d, {str(emp["_id"]): emp["name"]}) for d in docs])
+
+
+@router.post("/wfh-requests/preview", response_model=WfhPreviewOut)
+def preview_my_wfh_request(body: WfhSelfPreviewIn, me: Tuple[Context, Dict[str, Any]] = Depends(require_self)) -> WfhPreviewOut:
+    ctx, emp = me
+    return WfhPreviewOut(**_guard(lambda: wfh.preview(ctx.db, {**body.model_dump(), "employee_id": str(emp["_id"])})))
+
+
+@router.post("/wfh-requests", response_model=RequestOut, status_code=201)
+def request_wfh(body: WfhRequestIn, me: Tuple[Context, Dict[str, Any]] = Depends(require_self)) -> RequestOut:
+    ctx, emp = me
+    doc = _guard(lambda: people_requests.create_wfh_request(ctx.db, emp, body.model_dump()))
+    audit(ctx, "request_created", {"request": str(doc["_id"]), "kind": "wfh"})
     return request_out(ctx, doc, {str(emp["_id"]): emp["name"]})

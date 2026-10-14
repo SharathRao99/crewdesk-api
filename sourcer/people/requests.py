@@ -13,11 +13,11 @@ from bson import ObjectId
 from pymongo import ASCENDING, DESCENDING
 from pymongo.database import Database
 
-from sourcer.people import leave, lifecycle, policy as company_policy, store
+from sourcer.people import leave, lifecycle, policy as company_policy, store, wfh
 from sourcer.people.dates import iso, parse_date
 from sourcer.people.errors import NotFound, PeopleError
 
-KINDS = ("leave", "notice")
+KINDS = ("leave", "notice", "wfh")
 STATUSES = ("pending", "approved", "rejected", "cancelled")
 MAX_PENDING_PER_EMPLOYEE = 20
 BACKDATE_DAYS = 30  # an employee may ask for leave they already took, up to this long ago
@@ -124,6 +124,26 @@ def create_leave_request(db: Database, emp: Dict[str, Any], data: Dict[str, Any]
     return doc
 
 
+def create_wfh_request(db: Database, emp: Dict[str, Any], data: Dict[str, Any]) -> Dict[str, Any]:
+    ensure_indexes(db)
+    if _pending_count(db, emp["_id"]) >= MAX_PENDING_PER_EMPLOYEE:
+        raise PeopleError("You have too many requests waiting. Wait for some to be decided first")
+    body = {**data, "employee_id": str(emp["_id"])}
+    policy, emp, start, end, counted = wfh._resolve(db, body)
+    if start < date.today() - timedelta(days=BACKDATE_DAYS):
+        raise PeopleError(f"Work from home more than {BACKDATE_DAYS} days ago has to be recorded by HR")
+    problem = wfh.clash(db, emp["_id"], counted["units"], start, end)
+    if problem:
+        raise PeopleError(problem)
+    for other in db["requests"].find({"employee_id": emp["_id"], "kind": "wfh", "status": "pending"}, {"wfh.units": 1}):
+        if any(counted["units"].get(d, 0) + u > 1.0 + wfh.EPS for d, u in other["wfh"]["units"].items()):
+            raise PeopleError("You already have a request waiting for some of these dates")
+    doc = _base(emp, "wfh", _text(data.get("reason"), "Reason", 300))
+    doc["wfh"] = {"start_date": iso(start), "end_date": iso(end), "day_part": body.get("day_part") or "full", "days": counted["days"], "units": counted["units"]}
+    db["requests"].insert_one(doc)
+    return doc
+
+
 def create_notice_request(db: Database, emp: Dict[str, Any], last_working_day: Any, reason: Any) -> Dict[str, Any]:
     ensure_indexes(db)
     notice = emp.get("notice")
@@ -156,7 +176,7 @@ def list_for_employee(db: Database, employee_id: ObjectId, status: str = "", lim
     if status:
         _check_status(status)
         query["status"] = status
-    return list(db["requests"].find(query, {"leave.units": 0}).sort("created_at", -1).limit(limit))
+    return list(db["requests"].find(query, {"leave.units": 0, "wfh.units": 0}).sort("created_at", -1).limit(limit))
 
 
 def _check_status(status: str) -> None:
@@ -177,7 +197,7 @@ def list_for_decider(db: Database, decider: Dict[str, Any], status: str = "pendi
         query["employee_id"] = {"$in": ids}
     page, page_size = max(1, page), max(1, min(MAX_PAGE_SIZE, page_size))
     order = [("created_at", -1 if status in ("decided", "approved", "rejected", "cancelled") else 1), ("_id", 1)]  # oldest waiting first
-    cursor = db["requests"].find(query, {"leave.units": 0}).sort(order).skip((page - 1) * page_size).limit(page_size)
+    cursor = db["requests"].find(query, {"leave.units": 0, "wfh.units": 0}).sort(order).skip((page - 1) * page_size).limit(page_size)
     return list(cursor), db["requests"].count_documents(query)
 
 
@@ -255,6 +275,19 @@ def approve(db: Database, request_id: Any, decider: Dict[str, Any], allow_over_b
                 "allow_over_balance": bool(allow_over_balance) and decider["kind"] == "hr", "request_id": req["_id"],
             }, str(decider["user_id"]))
             extra["leave_record_id"] = record["_id"]
+        elif req["kind"] == "wfh":
+            w = req["wfh"]
+            emp = store.get(db, req["employee_id"])
+            check = wfh.preview(db, {"employee_id": str(emp["_id"]), "start_date": w["start_date"], "end_date": w["end_date"], "day_part": w["day_part"]})
+            if check["over_limit"] and decider["kind"] != "hr":
+                raise PeopleError("This would take them over the monthly work from home limit. Only HR can approve it")
+            record = wfh.create(db, {
+                "employee_id": str(emp["_id"]), "start_date": w["start_date"], "end_date": w["end_date"], "day_part": w["day_part"],
+                "reason": req.get("reason"), "approved_by_id": str(decider["employee_id"]) if decider["kind"] == "manager" else None,
+                "approved_by_label": "HR" if decider["kind"] == "hr" else None,
+                "allow_over_limit": bool(allow_over_balance) and decider["kind"] == "hr", "request_id": req["_id"],
+            }, str(decider["user_id"]))
+            extra["wfh_record_id"] = record["_id"]
         else:
             lifecycle.adjust_notice(db, req["employee_id"], req["notice"]["to_date"], req.get("reason"), "employee", str(decider["user_id"]))
         return _finish(db, req, "approved", decider, note_text, extra)

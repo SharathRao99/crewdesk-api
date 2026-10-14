@@ -5,6 +5,7 @@ from typing import List, Optional
 from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 from sourcer.people.models_leave import YearEffect
+from sourcer.people.models_wfh import WfhPreviewOut
 
 
 class LeaveRequestIn(BaseModel):
@@ -55,6 +56,13 @@ class RequestNoticeOut(BaseModel):
     to_date: str
 
 
+class RequestWfhOut(BaseModel):
+    start_date: str
+    end_date: str
+    day_part: str
+    days: float
+
+
 class RequestBalanceOut(BaseModel):
     """What approving a pending leave request would do to the balance (worked out now, not when it was asked)."""
 
@@ -66,7 +74,7 @@ class RequestBalanceOut(BaseModel):
 
 class RequestOut(BaseModel):
     id: str
-    kind: str  # leave | notice
+    kind: str  # leave | notice | wfh
     status: str  # pending | approved | rejected | cancelled
     employee_id: str
     employee_name: Optional[str] = None
@@ -75,6 +83,8 @@ class RequestOut(BaseModel):
     leave: Optional[RequestLeaveOut] = None
     notice: Optional[RequestNoticeOut] = None
     balance: Optional[RequestBalanceOut] = None
+    wfh: Optional[RequestWfhOut] = None
+    wfh_check: Optional[WfhPreviewOut] = None  # what approving a waiting WFH request would do to the month, worked out now
     decided_by_name: Optional[str] = None
     decided_by_kind: Optional[str] = None  # hr | manager | employee | system
     decided_at: Optional[str] = None

@@ -108,6 +108,14 @@ def _clash(db: Database, employee_id: ObjectId, units: Dict[str, float], start: 
     for ds in sorted(units):
         if taken.get(ds, 0.0) + units[ds] > 1.0 + EPS:
             return f"{ds} already has leave recorded for this person"
+    # A day cannot be both leave and work from home (half of each is fine).
+    wfh_query = {k: v for k, v in query.items() if k != "_id"}
+    for rec in db["wfh_records"].find(wfh_query, {"units": 1}):
+        for ds, u in rec["units"].items():
+            taken[ds] = taken.get(ds, 0.0) + u
+    for ds in sorted(units):
+        if taken.get(ds, 0.0) + units[ds] > 1.0 + EPS:
+            return f"{ds} already has work from home recorded for this person"
     return None
 
 

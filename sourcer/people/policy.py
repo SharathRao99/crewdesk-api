@@ -23,6 +23,8 @@ DEFAULT_POLICY: Dict[str, Any] = {
     "probation_notice_period": {"amount": 7, "unit": "days"},
     "prorate_new_joiners": False,          # false: a joiner gets the full yearly days; true: by months left in the year
     "manager_approval": True,              # true: a reporting manager or HR can approve a request; false: HR only
+    "wfh_enabled": True,                   # work from home: requests and records (false: switched off for this company)
+    "wfh_monthly_limit": 0,                # most WFH days a person can have in a month without HR's say-so; 0 = no limit
 }
 
 # Starting leave types for a new company. Editable, and no others (no casual leave) unless HR adds them.
@@ -113,6 +115,15 @@ def update_policy(db: Database, data: Dict[str, Any], by: str) -> Dict[str, Any]
         if not isinstance(data["manager_approval"], bool):
             raise PeopleError("Manager approval must be on or off")
         out["manager_approval"] = data["manager_approval"]
+    if "wfh_enabled" in data:
+        if not isinstance(data["wfh_enabled"], bool):
+            raise PeopleError("Work from home must be on or off")
+        out["wfh_enabled"] = data["wfh_enabled"]
+    if "wfh_monthly_limit" in data:
+        n = data["wfh_monthly_limit"]
+        if isinstance(n, bool) or not isinstance(n, int) or not 0 <= n <= 31:
+            raise PeopleError("The monthly work from home limit must be between 0 and 31 days (0 means no limit)")
+        out["wfh_monthly_limit"] = n
     if out:
         db["company_policy"].update_one({"_id": "policy"}, {"$set": {**out, "updated_at": _now(), "updated_by": by}}, upsert=True)
     return get_policy(db)

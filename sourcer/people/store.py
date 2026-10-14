@@ -48,6 +48,9 @@ def ensure_indexes(db: Database) -> None:
     company_policy.ensure_indexes(db)
     leave.ensure_indexes(db)
     people_requests.ensure_indexes(db)
+    from sourcer.people import wfh as people_wfh
+
+    people_wfh.ensure_indexes(db)
 
 
 def oid(value: Any) -> ObjectId:

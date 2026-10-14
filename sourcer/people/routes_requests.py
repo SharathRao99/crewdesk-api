@@ -5,9 +5,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from sourcer.api.deps import Context, audit, get_context
-from sourcer.people import leave, policy as company_policy, requests as people_requests, store
+from sourcer.people import leave, policy as company_policy, requests as people_requests, store, wfh as people_wfh
 from sourcer.people.models_requests import (
-    ApproveIn, RejectIn, RequestBalanceOut, RequestLeaveOut, RequestList, RequestNoticeOut, RequestOut, RequestSummary,
+    ApproveIn, RejectIn, RequestBalanceOut, RequestLeaveOut, RequestList, RequestNoticeOut, RequestOut, RequestSummary, RequestWfhOut,
 )
 from sourcer.people.routes import _guard, _iso
 
@@ -35,6 +35,13 @@ def request_out(ctx: Context, doc: Dict[str, Any], names: Dict[str, str], decide
     by = doc.get("decided_by") or {}
     lv = doc.get("leave")
     nt = doc.get("notice")
+    wf = doc.get("wfh")
+    wfh_check = None
+    if with_balance and wf and doc["status"] == "pending":
+        try:
+            wfh_check = people_wfh.preview(ctx.db, {"employee_id": str(doc["employee_id"]), "start_date": wf["start_date"], "end_date": wf["end_date"], "day_part": wf["day_part"]})
+        except Exception:  # the employee left or WFH was switched off since: nothing useful to show
+            wfh_check = None
     balance = None
     if with_balance and lv and doc["status"] == "pending":
         try:
@@ -47,6 +54,7 @@ def request_out(ctx: Context, doc: Dict[str, Any], names: Dict[str, str], decide
         reason=doc.get("reason"), created_at=_iso(doc.get("created_at")),
         leave=RequestLeaveOut(type_id=str(lv["type_id"]), type_name=lv["type_name"], start_date=lv["start_date"], end_date=lv["end_date"], day_part=lv["day_part"], days=lv["days"]) if lv else None,
         notice=RequestNoticeOut(from_date=nt["from_date"], to_date=nt["to_date"]) if nt else None, balance=balance,
+        wfh=RequestWfhOut(start_date=wf["start_date"], end_date=wf["end_date"], day_part=wf["day_part"], days=wf["days"]) if wf else None, wfh_check=wfh_check,
         decided_by_name=by.get("name"), decided_by_kind=by.get("kind"), decided_at=_iso(doc.get("decided_at")) or None, decision_note=doc.get("decision_note"),
         can_decide=bool(decider and doc["status"] == "pending" and people_requests.can_decide(ctx.db, doc, decider, policy or company_policy.get_policy(ctx.db))),
     )
