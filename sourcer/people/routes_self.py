@@ -2,12 +2,12 @@
 never on an id sent by the browser, so nobody can ask for someone else's data.
 """
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Literal, Optional, Tuple
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from sourcer.api.deps import Context, audit, get_context
-from sourcer.people import leave, policy as company_policy, requests as people_requests, store, wfh
+from sourcer.people import export as people_export, leave, policy as company_policy, requests as people_requests, store, wfh
 from sourcer.people.models import EmployeeOut
 from sourcer.people.models_leave import BalancesOut, HolidayOut, LeaveList, LeavePreviewOut, PolicyOut
 from sourcer.people.models_requests import LeaveRequestIn, LeaveRequestPreviewIn, NoticeRequestIn, RequestOut, RoutingOut
@@ -44,6 +44,16 @@ def my_profile(me: Tuple[Context, Dict[str, Any]] = Depends(require_self)) -> Em
 def my_balances(year: Optional[int] = Query(default=None, ge=1970, le=2200), me: Tuple[Context, Dict[str, Any]] = Depends(require_self)) -> BalancesOut:
     ctx, emp = me
     return BalancesOut(**leave.balances(ctx.db, emp, year))
+
+
+@router.get("/leave/export")
+def export_my_leave(format: Literal["csv", "xlsx"] = "xlsx", me: Tuple[Context, Dict[str, Any]] = Depends(require_self)) -> Response:
+    """The employee's own leave records as a spreadsheet. The employee comes from the login, never from the request."""
+    ctx, emp = me
+    records = leave.export_records(ctx.db, employee_id=emp["_id"])
+    audit(ctx, "leave_exported", {"format": format, "rows": len(records), "own": True})
+    data, media = people_export.render(format, "Leave", people_export.LEAVE_HEADERS, people_export.leave_rows(ctx.db, records))
+    return Response(content=data, media_type=media, headers={"Content-Disposition": f'attachment; filename="my-leave.{format}"', "Cache-Control": "no-store"})
 
 
 @router.get("/leave", response_model=LeaveList)

@@ -1,9 +1,9 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from sourcer.api.deps import Context, audit, require_admin
-from sourcer.people import leave, lifecycle, policy as company_policy, store
+from sourcer.people import export as people_export, leave, lifecycle, policy as company_policy, store
 from sourcer.people.models import EmployeeOut
 from sourcer.people.models_leave import (
     AdjustmentIn, AdjustmentOut, BalancesOut, HolidayIn, HolidayOut, HolidayPatch, LeaveCancelIn, LeaveIn, LeaveList, LeaveOut,
@@ -142,6 +142,32 @@ def list_leave(
     docs, total = _guard(lambda: leave.list_records(ctx.db, employee_id, type_id, status, date_from, date_to, page, page_size))
     names = store.names_of(ctx.db, [d["employee_id"] for d in docs])
     return LeaveList(items=[_leave_out(d, names) for d in docs], total=total, page=page, page_size=page_size)
+
+
+def _download(fmt: str, base: str, sheet: str, headers: List[str], rows: List[List[Any]]) -> Response:
+    data, media = people_export.render(fmt, sheet, headers, rows)
+    return Response(content=data, media_type=media, headers={"Content-Disposition": f'attachment; filename="{base}.{fmt}"', "Cache-Control": "no-store"})
+
+
+@router.get("/leave/export")
+def export_leave(
+    format: Literal["csv", "xlsx"] = "xlsx",
+    employee_id: str = Query(default="", max_length=24), type_id: str = Query(default="", max_length=24),
+    status: str = Query(default="", max_length=10), date_from: str = Query(default="", max_length=10), date_to: str = Query(default="", max_length=10),
+    ctx: Context = Depends(require_admin),
+) -> Response:
+    """Leave records as a spreadsheet: everyone's, or one employee's, with the same filters as the list."""
+    records = _guard(lambda: leave.export_records(ctx.db, employee_id, type_id, status, date_from, date_to))
+    audit(ctx, "leave_exported", {"format": format, "rows": len(records), "employee": employee_id or None})
+    return _download(format, "leave-records", "Leave", people_export.LEAVE_HEADERS, people_export.leave_rows(ctx.db, records))
+
+
+@router.get("/leave/balances-export")
+def export_balances(format: Literal["csv", "xlsx"] = "xlsx", year: Optional[int] = Query(default=None, ge=1990, le=2200), ctx: Context = Depends(require_admin)) -> Response:
+    """Every employee's balance for each leave type, for one leave year."""
+    rows = _guard(lambda: people_export.balance_rows(ctx.db, year))
+    audit(ctx, "balances_exported", {"format": format, "rows": len(rows), "year": year})
+    return _download(format, "leave-balances", "Balances", people_export.BALANCE_HEADERS, rows)
 
 
 @router.post("/leave", response_model=LeaveOut, status_code=201)

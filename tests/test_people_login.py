@@ -415,3 +415,79 @@ def test_retention_anonymises_only_people_who_left_long_ago(api, c, capsys):
     assert c.get(f"/people/employees/{recent['id']}").json()["name"] == "Recent"
     assert c.get(f"/people/employees/{active['id']}").json()["name"] == "Active"
     assert privacy.run_retention(db, 365) == 0  # nothing left to do
+
+
+# ---------- spreadsheets ----------
+
+def _csv_rows(res):
+    import csv
+    import io
+
+    return list(csv.reader(io.StringIO(res.content.decode("utf-8-sig"))))
+
+
+def test_hr_exports_everyones_leave_or_one_persons_as_csv_or_excel(api, c):
+    a, b = emp(c, "Asha"), emp(c, "Bela")
+    take(c, a, "2026-03-02", "2026-03-04")
+    take(c, b, "2026-03-09")
+    everyone = c.get("/people/leave/export", params={"format": "csv"})
+    assert everyone.status_code == 200 and everyone.headers["content-type"].startswith("text/csv")
+    assert "attachment" in everyone.headers["content-disposition"] and everyone.headers["cache-control"] == "no-store"
+    rows = _csv_rows(everyone)
+    assert rows[0][:4] == ["Employee", "Employee no.", "Leave type", "From"] and len(rows) == 3
+    assert {r[0] for r in rows[1:]} == {"Asha", "Bela"}
+    one = _csv_rows(c.get("/people/leave/export", params={"format": "csv", "employee_id": a["id"]}))
+    assert [r[0] for r in one[1:]] == ["Asha"] and one[1][6] == "3.0" or one[1][6] == "3"
+
+    xlsx = c.get("/people/leave/export", params={"employee_id": a["id"]})
+    assert xlsx.status_code == 200 and xlsx.content[:2] == b"PK"  # an .xlsx is a zip
+    from io import BytesIO
+    from openpyxl import load_workbook
+
+    ws = load_workbook(BytesIO(xlsx.content)).active
+    assert ws["A2"].value == "Asha" and ws.max_row == 2
+
+
+def test_export_filters_and_refuses_bad_input(api, c):
+    a = emp(c, "Asha")
+    take(c, a, "2026-03-02")
+    assert len(_csv_rows(c.get("/people/leave/export", params={"format": "csv", "status": "cancelled"}))) == 1  # header only
+    assert c.get("/people/leave/export", params={"format": "pdf"}).status_code == 422
+    assert c.get("/people/leave/export", params={"status": "bogus"}).status_code == 422
+    assert c.get("/people/leave/export", params={"employee_id": "x" * 30}).status_code == 422
+
+
+def test_spreadsheet_formulas_are_defused(api, c):
+    a = emp(c, "Asha")
+    res = c.post("/people/leave", {"employee_id": a["id"], "type_id": types(c)["PL"]["id"], "start_date": "2026-03-02", "reason": "=HYPERLINK(\"http://x\")", "note": "@SUM(1)"})
+    assert res.status_code == 201, res.text
+    row = _csv_rows(c.get("/people/leave/export", params={"format": "csv"}))[1]
+    assert "'=HYPERLINK" in row[9] and row[10] == "'@SUM(1)"
+
+
+def test_balances_export_lists_every_employee_and_type(api, c):
+    a = emp(c, "Asha")
+    take(c, a, "2026-03-02", "2026-03-03")
+    emp(c, "Bela")
+    rows = _csv_rows(c.get("/people/leave/balances-export", params={"format": "csv", "year": 2026}))
+    assert rows[0][0] == "Employee" and len(rows) == 1 + 2 * 3  # two people, three starting leave types
+    asha_pl = next(r for r in rows if r[0] == "Asha" and r[4] == "Planned leave")
+    assert asha_pl[5] in ("18", "18.0") and asha_pl[8] in ("2", "2.0") and asha_pl[9] in ("16", "16.0")
+    unpaid = next(r for r in rows if r[0] == "Asha" and r[4] == "Unpaid leave")
+    assert unpaid[5] == "No limit"
+
+
+def test_an_employee_exports_only_their_own_leave_and_cannot_use_hr_exports(api, c):
+    a, _, ha = member(api, c, "Asha")
+    b = emp(c, "Bela")
+    take(c, a, "2026-03-02")
+    take(c, b, "2026-03-09")
+    own = api.get("/people/me/leave/export", params={"format": "csv"}, headers=ha)
+    assert own.status_code == 200
+    rows = _csv_rows(own)
+    assert [r[0] for r in rows[1:]] == ["Asha"]
+    assert api.get("/people/me/leave/export", params={"format": "csv", "employee_id": b["id"]}, headers=ha).content == own.content  # the id is ignored
+    assert api.get("/people/leave/export", headers=ha).status_code == 403
+    assert api.get("/people/leave/balances-export", headers=ha).status_code == 403
+    assert c.other.get("/people/leave/export", params={"format": "csv"}).status_code == 200
+    assert len(_csv_rows(c.other.get("/people/leave/export", params={"format": "csv"}))) == 1  # another company sees none of it

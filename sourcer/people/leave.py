@@ -302,10 +302,7 @@ def cancel(db: Database, record_id: Any, reason: Any, by: str) -> Dict[str, Any]
     return get(db, record_id)
 
 
-def list_records(
-    db: Database, employee_id: Any = None, type_id: Any = None, status: str = "", date_from: str = "", date_to: str = "",
-    page: int = 1, page_size: int = 25,
-) -> Tuple[List[Dict[str, Any]], int]:
+def _record_query(employee_id: Any, type_id: Any, status: str, date_from: str, date_to: str) -> Dict[str, Any]:
     query: Dict[str, Any] = {}
     if employee_id:
         query["employee_id"] = store.oid(employee_id)
@@ -319,9 +316,28 @@ def list_records(
         query["end_date"] = {"$gte": iso(parse_date(date_from, "From date", 5))}
     if date_to:
         query["start_date"] = {"$lte": iso(parse_date(date_to, "To date", 5))}
+    return query
+
+
+def list_records(
+    db: Database, employee_id: Any = None, type_id: Any = None, status: str = "", date_from: str = "", date_to: str = "",
+    page: int = 1, page_size: int = 25,
+) -> Tuple[List[Dict[str, Any]], int]:
+    query = _record_query(employee_id, type_id, status, date_from, date_to)
     page, page_size = max(1, page), max(1, min(MAX_PAGE_SIZE, page_size))
     cursor = db["leave_records"].find(query, {"units": 0}).sort([("start_date", -1), ("_id", 1)]).skip((page - 1) * page_size).limit(page_size)
     return list(cursor), db["leave_records"].count_documents(query)
+
+
+EXPORT_MAX_ROWS = 10_000
+
+
+def export_records(
+    db: Database, employee_id: Any = None, type_id: Any = None, status: str = "", date_from: str = "", date_to: str = "",
+) -> List[Dict[str, Any]]:
+    """Every record matching the filters (up to EXPORT_MAX_ROWS), newest first, for a spreadsheet."""
+    query = _record_query(employee_id, type_id, status, date_from, date_to)
+    return list(db["leave_records"].find(query, {"units": 0}).sort([("start_date", -1), ("_id", 1)]).limit(EXPORT_MAX_ROWS))
 
 
 # ---------- adjustments (HR corrections to a balance) ----------
