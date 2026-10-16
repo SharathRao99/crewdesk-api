@@ -1,0 +1,24 @@
+# Render blueprint for a free demo. See docs/DEMO_HOSTING.md.
+services:
+  - type: web
+    name: crewdesk-api
+    runtime: python
+    plan: free
+    buildCommand: pip install .
+    startCommand: sourcer api --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: RUN_WORKER_IN_API # one process on the free plan: the sourcing worker runs inside the API
+        value: "1"
+      - key: PLATFORM_DB
+        value: platform
+      - key: TENANT_DB_PREFIX
+        value: tenant_
+      - key: MONGODB_URI # the MongoDB Atlas connection string
+        sync: false
+      - key: SECRETS_KEY
+        sync: false
+      - key: API_SERVICE_KEY
+        sync: false

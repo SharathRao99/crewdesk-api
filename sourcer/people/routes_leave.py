@@ -164,10 +164,10 @@ def export_leave(
 
 @router.get("/leave/balances-export")
 def export_balances(format: Literal["csv", "xlsx"] = "xlsx", year: Optional[int] = Query(default=None, ge=1990, le=2200), ctx: Context = Depends(require_admin)) -> Response:
-    """Every employee's balance for each leave type, for one leave year."""
-    rows = _guard(lambda: people_export.balance_rows(ctx.db, year))
+    """One row per employee: days used and remaining for each leave type, for one leave year."""
+    headers, rows = _guard(lambda: people_export.balance_table(ctx.db, year))
     audit(ctx, "balances_exported", {"format": format, "rows": len(rows), "year": year})
-    return _download(format, "leave-balances", "Balances", people_export.BALANCE_HEADERS, rows)
+    return _download(format, "leave-balances", "Balances", headers, rows)
 
 
 @router.post("/leave", response_model=LeaveOut, status_code=201)

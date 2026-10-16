@@ -8,6 +8,7 @@ import logging
 import os
 import signal
 import socket
+import threading
 import time
 from typing import Any, Callable, Optional
 
@@ -47,6 +48,33 @@ def run_once(
     return False
 
 
+def loop(worker_id: str, stop: dict, poll_seconds: float = 5.0) -> None:
+    """Run jobs until stop["now"] is set."""
+    while not stop["now"]:
+        try:
+            ran = run_once(worker_id, stopping=lambda: stop["now"])
+        except Exception:
+            logger.exception("worker loop error")
+            ran = False
+        if not ran:
+            time.sleep(poll_seconds)
+
+
+def start_in_background(poll_seconds: float = 5.0) -> Callable[[], None]:
+    """Run the worker on a thread inside this process (for a small host that has one process only). Returns a function that stops it."""
+    stop = {"now": False}
+    worker_id = f"{socket.gethostname()}:{os.getpid()}:thread"
+    thread = threading.Thread(target=loop, args=(worker_id, stop, poll_seconds), name="sourcing-worker", daemon=True)
+    thread.start()
+    logger.info("worker %s started inside the API", worker_id)
+
+    def stopper() -> None:
+        stop["now"] = True
+        thread.join(timeout=30)
+
+    return stopper
+
+
 def main(poll_seconds: float = 5.0) -> None:
     worker_id = f"{socket.gethostname()}:{os.getpid()}"
     stop = {"now": False}
@@ -58,12 +86,5 @@ def main(poll_seconds: float = 5.0) -> None:
     signal.signal(signal.SIGTERM, handle)
     signal.signal(signal.SIGINT, handle)
     logger.info("worker %s started", worker_id)
-    while not stop["now"]:
-        try:
-            ran = run_once(worker_id, stopping=lambda: stop["now"])
-        except Exception:
-            logger.exception("worker loop error")
-            ran = False
-        if not ran:
-            time.sleep(poll_seconds)
+    loop(worker_id, stop, poll_seconds)
     logger.info("worker stopped")

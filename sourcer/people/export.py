@@ -3,18 +3,18 @@ and notes are text people typed and a spreadsheet would otherwise run them."""
 
 import csv
 import io
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Tuple
 
 from pymongo.database import Database
 
-from sourcer.people import leave, store
+from sourcer.people import leave, policy as pol, store
 
 CSV_MEDIA = "text/csv; charset=utf-8"
 XLSX_MEDIA = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 _FORMULA_START = ("=", "+", "-", "@", "\t", "\r")
 
 LEAVE_HEADERS = ["Employee", "Employee no.", "Leave type", "From", "To", "Day part", "Days", "Status", "Over balance", "Reason", "Note", "Approved by", "Recorded on"]
-BALANCE_HEADERS = ["Employee", "Employee no.", "Employee status", "Leave year", "Leave type", "Entitlement", "Carried in", "Adjusted", "Used", "Remaining"]
+BALANCE_FIXED = ["Employee", "Employee no.", "Employee status", "Leave year"]
 _PARTS = {"full": "Full day", "first_half": "First half", "second_half": "Second half"}
 
 
@@ -80,13 +80,27 @@ def leave_rows(db: Database, records: List[Dict[str, Any]]) -> List[List[Any]]:
     return rows
 
 
-def balance_rows(db: Database, year: int = None) -> List[List[Any]]:
-    """One row per employee and leave type for a leave year (default: the current one)."""
-    rows = []
-    for emp in db["employees"].find({}, {"name": 1, "employee_no": 1, "joining_date": 1, "status": 1}).sort("name_lc", 1).limit(2000):
-        b = leave.balances(db, emp, year)
+def balance_table(db: Database, year: int = None) -> Tuple[List[str], List[List[Any]]]:
+    """One row per employee, with a "used" and a "remaining" column for each leave type, for a leave year (default: the current one)."""
+    people = list(db["employees"].find({}, {"name": 1, "employee_no": 1, "joining_date": 1, "status": 1}).sort("name_lc", 1).limit(2000))
+    policy = pol.get_policy(db)
+    order: List[str] = []  # leave types in the company's own order, only those that appear for someone
+    per_person = []
+    for emp in people:
+        b = leave.balances(db, emp, year, policy)
+        per_person.append((emp, b))
         for t in b["types"]:
-            rows.append([emp["name"], emp.get("employee_no"), str(emp.get("status", "")).capitalize(), b["label"], t["name"],
-                         "No limit" if t["entitlement"] is None else t["entitlement"], t["carried_in"], t["adjusted"], t["used"],
-                         "No limit" if t["remaining"] is None else t["remaining"]])
-    return rows
+            if t["name"] not in order:
+                order.append(t["name"])
+    headers = list(BALANCE_FIXED)
+    for name in order:
+        headers += [f"{name} used", f"{name} remaining"]
+    rows = []
+    for emp, b in per_person:
+        by_name = {t["name"]: t for t in b["types"]}
+        row: List[Any] = [emp["name"], emp.get("employee_no"), str(emp.get("status", "")).capitalize(), b["label"]]
+        for name in order:
+            t = by_name.get(name)
+            row += [None, None] if t is None else [t["used"], "No limit" if t["remaining"] is None else t["remaining"]]
+        rows.append(row)
+    return headers, rows

@@ -465,16 +465,19 @@ def test_spreadsheet_formulas_are_defused(api, c):
     assert "'=HYPERLINK" in row[9] and row[10] == "'@SUM(1)"
 
 
-def test_balances_export_lists_every_employee_and_type(api, c):
+def test_balances_export_is_one_row_per_employee_with_columns_per_leave_type(api, c):
     a = emp(c, "Asha")
     take(c, a, "2026-03-02", "2026-03-03")
     emp(c, "Bela")
     rows = _csv_rows(c.get("/people/leave/balances-export", params={"format": "csv", "year": 2026}))
-    assert rows[0][0] == "Employee" and len(rows) == 1 + 2 * 3  # two people, three starting leave types
-    asha_pl = next(r for r in rows if r[0] == "Asha" and r[4] == "Planned leave")
-    assert asha_pl[5] in ("18", "18.0") and asha_pl[8] in ("2", "2.0") and asha_pl[9] in ("16", "16.0")
-    unpaid = next(r for r in rows if r[0] == "Asha" and r[4] == "Unpaid leave")
-    assert unpaid[5] == "No limit"
+    head = rows[0]
+    assert head[:4] == ["Employee", "Employee no.", "Employee status", "Leave year"]
+    assert head[4:] == ["Planned leave used", "Planned leave remaining", "Sick leave used", "Sick leave remaining", "Unpaid leave used", "Unpaid leave remaining"]
+    assert len(rows) == 3  # the header and one row each for two people
+    asha = dict(zip(head, next(r for r in rows if r[0] == "Asha")))
+    assert asha["Planned leave used"] in ("2", "2.0") and asha["Planned leave remaining"] in ("16", "16.0")
+    assert asha["Sick leave used"] in ("0", "0.0") and asha["Sick leave remaining"] in ("12", "12.0")
+    assert asha["Unpaid leave remaining"] == "No limit"
 
 
 def test_an_employee_exports_only_their_own_leave_and_cannot_use_hr_exports(api, c):

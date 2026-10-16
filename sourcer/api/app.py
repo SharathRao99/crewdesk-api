@@ -5,6 +5,8 @@ the tenant and user from the logged-in session. Tenant data is only reachable th
 `Context` dependency (deps.py), which checks that the user really belongs to the tenant.
 """
 
+import os
+from contextlib import asynccontextmanager
 from typing import Dict
 
 from fastapi import Depends, FastAPI
@@ -17,7 +19,20 @@ from sourcer.people import routes_self as people_self_routes
 from sourcer.people import routes_wfh as people_wfh_routes
 from sourcer.api.routes import auth, candidates, export, jobs, join, public, roles, templates
 
-app = FastAPI(title="Talent Sourcer API", version="0.2.0")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """RUN_WORKER_IN_API=1 runs the sourcing worker inside this process, for a small host with one process. Otherwise run `sourcer worker`."""
+    stop = None
+    if os.environ.get("RUN_WORKER_IN_API") == "1":
+        from sourcer import worker
+
+        stop = worker.start_in_background()
+    yield
+    if stop:
+        stop()
+
+
+app = FastAPI(title="Talent Sourcer API", version="0.2.0", lifespan=lifespan)
 
 
 @app.get("/health", tags=["health"])
